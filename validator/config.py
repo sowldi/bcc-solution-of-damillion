@@ -68,6 +68,7 @@ class Settings:
     rpm: int
     max_output_tokens: int = 4096  # лимит длины ответа модели
     max_requests: int = 10  # не больше запросов к модели за один прогон
+    max_pair_requests: int = 10  # проверка пар требований (этап 7); 0 — выключена
     base_url: str | None = None  # свой адрес сервиса (прокси, совместимый API); иначе стандартный
 
     @property
@@ -166,6 +167,9 @@ def load_settings(
         ),
         max_requests=_parse_int(
             get("LLM_MAX_REQUESTS"), "LLM_MAX_REQUESTS", 10, minimum=1, maximum=100
+        ),
+        max_pair_requests=_parse_int(
+            get("LLM_MAX_PAIR_REQUESTS"), "LLM_MAX_PAIR_REQUESTS", 10, minimum=0, maximum=100
         ),
         base_url=get("LLM_BASE_URL"),
     )

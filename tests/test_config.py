@@ -100,6 +100,9 @@ def test_ollama_needs_no_api_key(tmp_path: Path) -> None:
         ("LLM_MAX_OUTPUT_TOKENS=10", "LLM_MAX_OUTPUT_TOKENS"),
         ("LLM_MAX_REQUESTS=0", "LLM_MAX_REQUESTS"),
         ("LLM_MAX_REQUESTS=1000", "LLM_MAX_REQUESTS"),
+        ("LLM_MAX_PAIR_REQUESTS=-1", "LLM_MAX_PAIR_REQUESTS"),
+        ("LLM_MAX_PAIR_REQUESTS=101", "LLM_MAX_PAIR_REQUESTS"),
+        ("LLM_MAX_PAIR_REQUESTS=2.5", "LLM_MAX_PAIR_REQUESTS"),
     ],
 )
 def test_invalid_values_name_the_variable(tmp_path: Path, line: str, variable: str) -> None:
@@ -124,7 +127,24 @@ def test_llm_limits_have_safe_defaults(tmp_path: Path) -> None:
 
     assert settings.max_output_tokens == 4096
     assert settings.max_requests == 10
+    assert settings.max_pair_requests == 10
     assert settings.base_url is None
+
+
+@pytest.mark.parametrize(("value", "expected"), [("0", 0), ("1", 1), ("100", 100)])
+def test_pair_budget_is_separate_and_can_be_disabled(
+    tmp_path: Path, value: str, expected: int
+) -> None:
+    from validator.llm import LLMOptions
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"LLM_MAX_REQUESTS=3\nLLM_MAX_PAIR_REQUESTS={value}\n", encoding="utf-8")
+
+    settings = load_settings(env_file=env_file)
+    options = LLMOptions.from_settings(settings)
+
+    assert (settings.max_requests, settings.max_pair_requests) == (3, expected)
+    assert (options.max_requests, options.max_pair_requests) == (3, expected)
 
 
 def test_llm_limits_and_endpoint_are_configurable(tmp_path: Path) -> None:

@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from validator.llm.base import LLMRequest, LLMResponse
+from validator.llm.prompts import PAIR_SYSTEM_PROMPT
 from validator.llm.transport import HttpResponse
 
 EMPTY_ANSWER = '{"findings": []}'
+EMPTY_RELATIONS = '{"relations": []}'  # пустой ответ на проверку пары (этап 7)
 
 
 class FakeProvider:
@@ -29,10 +31,15 @@ class FakeProvider:
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         self.requests.append(request)
-        reply = self._replies.pop(0) if self._replies else EMPTY_ANSWER
+        reply = self._replies.pop(0) if self._replies else _empty(request)
         if isinstance(reply, Exception):
             raise reply
         return LLMResponse(reply, self.name, self.model, "stop")
+
+
+def _empty(request: LLMRequest) -> str:
+    """Ответ «замечаний нет» в формате вида запроса: обзор требования или проверка пары."""
+    return EMPTY_RELATIONS if request.system == PAIR_SYSTEM_PROMPT else EMPTY_ANSWER
 
 
 @dataclass(frozen=True)

@@ -33,6 +33,9 @@ ReviewCategory = Literal[
     "subjectivity",
     "missing_condition",
 ]
+# Тип связи двух требований в Fact Graph (этап 7). Источник — первое требование замечания,
+# цель — второе. Симметричные связи хранятся в порядке документа.
+RelationType = Literal["depends_on", "conflicts_with", "related_to", "requires_condition"]
 # Область, в которой утверждается отсутствие, и что именно отсутствует.
 AbsenceScope = Literal["table", "section", "requirement", "id_registry", "heading_registry"]
 ABSENCE_SCOPES: tuple[AbsenceScope, ...] = get_args(AbsenceScope)
@@ -54,6 +57,14 @@ EVIDENCE_KINDS: tuple[EvidenceKind, ...] = get_args(EvidenceKind)
 EVIDENCE_STATUSES: tuple[EvidenceStatus, ...] = get_args(EvidenceStatus)
 ORIGINS: tuple[Origin, ...] = get_args(Origin)
 REVIEW_CATEGORIES: tuple[ReviewCategory, ...] = get_args(ReviewCategory)
+RELATION_TYPES: tuple[RelationType, ...] = get_args(RelationType)
+SYMMETRIC_RELATIONS: frozenset[RelationType] = frozenset({"conflicts_with", "related_to"})
+RELATION_TITLES: dict[RelationType, str] = {
+    "depends_on": "зависит от",
+    "conflicts_with": "противоречит",
+    "related_to": "связано с",
+    "requires_condition": "требует условия из",
+}
 
 SEVERITY_TITLES: dict[Severity, str] = {
     "critical": "Критичное",
@@ -187,8 +198,18 @@ class Finding:
     # Evidence Gate она не влияет.
     review_category: ReviewCategory | None = None
     confidence: float | None = None
+    # Связь двух требований (этап 7): requirement_ids = (источник, цель), по цитате на
+    # каждое. None — обычное замечание; в JSON поле есть только у связей, поэтому JSON
+    # замечаний этапов 5–6 не меняется.
+    relation: RelationType | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        data = self._to_dict()
+        if self.relation is not None:
+            data["relation"] = self.relation
+        return data
+
+    def _to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "document_sha256": self.document_sha256,
@@ -242,6 +263,10 @@ class Finding:
                 else _choice(data, "review_category", REVIEW_CATEGORIES),
             ),
             confidence=_confidence(data),
+            relation=cast(
+                RelationType | None,
+                None if data.get("relation") is None else _choice(data, "relation", RELATION_TYPES),
+            ),
         )
 
 

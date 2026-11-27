@@ -18,9 +18,11 @@ from tests.builders import (
     write_text,
 )
 from tests.conftest import AGENT_ENV_VARS, PROJECT_ROOT, RunCli
+from tests.graph_helpers import GRAPH_SPEC, relation, relations_json
 from tests.llm_helpers import (
     FAKE_KEY,
     StubServer,
+    by_task,
     findings_json,
     hypothesis,
     json_reply,
@@ -60,6 +62,9 @@ def _ollama_env(server: StubServer, **extra: str) -> dict[str, str]:
         "LLM_MAX_RETRIES": "0",
         # По запросу на требование: без высокого лимита частоты тест ждал бы 6 с на запрос.
         "LLM_RPM": "10000",
+        # Эти тесты проверяют HTTP-путь обзора (этап 6): заглушка отвечает в формате обзора.
+        # Проверку пар (этап 7) включают тесты ниже, с ответом по виду запроса (by_task).
+        "LLM_MAX_PAIR_REQUESTS": "0",
         **extra,
     }
 
@@ -469,3 +474,78 @@ def test_partial_llm_failure_is_reported_with_progress(run_cli: RunCli, tmp_path
     assert "Ф-2" in result.stderr
     assert "проверено 1 из 2" in result.stderr
     assert not report.exists()
+
+
+# --- этап 7: Fact Graph и проверка пар ----------------------------------------------------
+
+PAIR_CONFLICT = relation(
+    "Ф-3", "не хранит бронь книги дольше 3 дней", "Ф-4", "хранит бронь книги 5 дней"
+)
+
+
+def _graph_spec(tmp_path: Path) -> Path:
+    path = tmp_path / "graph.md"
+    path.write_text(GRAPH_SPEC, encoding="utf-8")
+    return path
+
+
+def test_standard_run_checks_candidate_pairs_and_reports_the_graph(
+    run_cli: RunCli, tmp_path: Path
+) -> None:
+    report = tmp_path / "report.md"
+    route = by_task(ollama_reply('{"findings": []}'), ollama_reply(relations_json(PAIR_CONFLICT)))
+
+    with stub_server(route=route) as server:
+        env = _ollama_env(server, LLM_MAX_PAIR_REQUESTS="10")
+        result = run_cli(str(_graph_spec(tmp_path)), str(report), extra_env=env)
+
+    assert result.returncode == EXIT_OK, result.stderr
+    pair_requests = [r for r in server.received if b"relations" in r.body]
+    assert len(pair_requests) == 6  # все пары-кандидаты, каждая один раз
+    text = report.read_text(encoding="utf-8")
+    assert "## 6. Связи между требованиями (Fact Graph)" in text
+    assert "`Ф-2` зависит от `Ф-1`" in text
+    assert "Возможное противоречие: `Ф-3` и `Ф-4`" in text
+    assert "Связей: подтверждено 1, гипотез LLM 1 (не подтверждены)" in result.stdout
+    assert "пар-кандидатов 6, проверено моделью 6" in result.stdout
+    assert "Проверка пар:" in result.stderr
+
+
+def test_pair_check_failure_stops_without_a_report(run_cli: RunCli, tmp_path: Path) -> None:
+    report = tmp_path / "report.md"
+    route = by_task(ollama_reply('{"findings": []}'), json_reply(503, {"error": "overloaded"}))
+
+    with stub_server(route=route) as server:
+        env = _ollama_env(server, LLM_MAX_PAIR_REQUESTS="10")
+        result = run_cli(str(_graph_spec(tmp_path)), str(report), extra_env=env)
+
+    assert result.returncode == EXIT_PROVIDER_ERROR
+    assert "Проверка пар прервана на паре Ф-3 — Ф-4" in result.stderr
+    assert not report.exists()
+
+
+def test_zero_pair_budget_sends_only_review_requests(run_cli: RunCli, tmp_path: Path) -> None:
+    report = tmp_path / "report.md"
+    route = by_task(ollama_reply('{"findings": []}'), json_reply(500, {"error": "unexpected"}))
+
+    with stub_server(route=route) as server:
+        result = run_cli(str(_graph_spec(tmp_path)), str(report), extra_env=_ollama_env(server))
+
+    assert result.returncode == EXIT_OK, result.stderr
+    assert not any(b"relations" in r.body for r in server.received)
+    assert "Проверка пар моделью отключена (LLM_MAX_PAIR_REQUESTS = 0)" in report.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_rules_only_builds_the_deterministic_graph(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = tmp_path / "report.md"
+
+    assert main([str(_graph_spec(tmp_path)), str(report), "--rules-only"]) == EXIT_OK
+
+    text = report.read_text(encoding="utf-8")
+    assert "`Ф-2` зависит от `Ф-1`" in text
+    assert "Пары-кандидаты моделью не проверялись (режим --rules-only)" in text
+    assert "Связей: подтверждено 1" in capsys.readouterr().out

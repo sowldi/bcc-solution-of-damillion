@@ -1,8 +1,10 @@
 """Markdown-отчёт на русском.
 
-Этап 4: паспорт прогона, сводка извлечения текста, нарезка требований, детерминированная
-проверка (замечания правил, прошедшие проверку доказательств) и гипотезы LLM — отдельным
-разделом и со статусом «не подтверждено»: с замечаниями правил они не смешиваются.
+Разделы: паспорт прогона, сводка извлечения текста, нарезка требований, детерминированная
+проверка (замечания правил, прошедшие проверку доказательств), гипотезы LLM-обзора —
+отдельным разделом и со статусом «не подтверждено», и Fact Graph (этап 7): подтверждённые
+машинной проверкой связи отдельно от гипотез модели о связях; проверка цитат и логический
+вывод не смешиваются, о неподтверждённой связи не говорится как об установленной.
 """
 
 from __future__ import annotations
@@ -14,15 +16,19 @@ from typing import TYPE_CHECKING
 
 from validator.criteria import criterion
 from validator.findings import (
+    RELATION_TITLES,
+    RELATION_TYPES,
     REVIEW_CATEGORY_TITLES,
     RULE_CATEGORY_TITLES,
     SEVERITIES,
     SEVERITY_TITLES,
+    SYMMETRIC_RELATIONS,
     AbsenceClaim,
     Evidence,
     Finding,
     Severity,
 )
+from validator.graph import FactGraph, GraphEdge
 from validator.ingest.common import one_line
 from validator.lint import LintResult
 from validator.model import FORMAT_TITLES, Document
@@ -31,7 +37,7 @@ from validator.segmentation import CATEGORY_TITLES, Requirement, Segmentation
 from validator.segmentation.text import parse_prefix
 
 if TYPE_CHECKING:  # отчёт не загружает LLM-слой: в режиме --rules-only его нет
-    from validator.llm import LLMAnalysis
+    from validator.llm import CrossCheckAnalysis, LLMAnalysis
 
 # Причины, по которым требование не отправлено модели (коды validator.llm.analysis).
 _SKIP_TITLES: dict[str, str] = {
@@ -402,12 +408,259 @@ def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | N
     return "\n\n".join(parts)
 
 
+_LIST_LIMIT = 10  # сколько пар и основ показывать в списке
+_EXCLUDE_TITLES: dict[str, str] = {
+    "empty": "пустой текст",
+    "no_source": "нет корректной привязки к источнику",
+}
+
+
+def _edge_block(number: int, edge: GraphEdge) -> str:
+    source, target = edge.evidence
+    if edge.rule_id == "XRF-01":
+        basis = (
+            "обе цитаты точно найдены в своих требованиях (Evidence Gate); цитата "
+            f"`{edge.source_id}` — ID требования `{edge.target_id}`, и этот ID принадлежит "
+            "только ему"
+        )
+    else:
+        basis = (
+            f"замечание `{edge.finding_id}` (раздел 4): один параметр с разными значениями "
+            "в одной таблице «параметр — значение»"
+        )
+    return "\n".join(
+        [
+            f"**6.{number}. `{edge.source_id}` {RELATION_TITLES[edge.relation]} "
+            f"`{edge.target_id}`** — {edge.rule_id} · {_escape(edge.title)}",
+            "",
+            f"- Цитата `{edge.source_id}`: {_quote(source.quote)} — {_where(source)}",
+            f"- Цитата `{edge.target_id}`: {_quote(target.quote)} — {_where(target)}",
+            f"- Проверено: {basis}",
+            "- Статус: подтверждено",
+        ]
+    )
+
+
+def _relation_hypothesis_block(number: int, finding: Finding) -> str:
+    item = criterion(finding.criterion)
+    source, target = finding.evidence
+    relation = finding.relation
+    assert relation is not None
+    if relation in SYMMETRIC_RELATIONS:
+        ends = f"`{source.requirement_id}` и `{target.requirement_id}`"
+    else:
+        ends = f"`{source.requirement_id}` {RELATION_TITLES[relation]} `{target.requirement_id}`"
+    lines = [
+        f"**6.{number}. {_escape(finding.title)}: {ends}**",
+        "",
+        f"- Цитата `{source.requirement_id}`: {_quote(source.quote)} — {_where(source)}",
+        f"- Цитата `{target.requirement_id}`: {_quote(target.quote)} — {_where(target)}",
+        f"- Тип связи: {relation} — {RELATION_TITLES[relation]}",
+        f"- Предполагаемая важность: {SEVERITY_TITLES[finding.severity]} (по типу связи)",
+        f"- Обоснование модели: {_escape(finding.explanation)}",
+        f"- Рекомендация модели: {_escape(finding.recommendation)}",
+    ]
+    if finding.confidence is not None:
+        lines.append(f"- Уверенность модели: {finding.confidence:g} — на статус не влияет")
+    lines += [
+        f"- Критерий: {item.reference} — {item.title}",
+        "- Происхождение цитат: проверено Evidence Gate (точный текст обоих требований, "
+        "место в файле)",
+        "- Связь: не проверена — это гипотеза модели",
+        "- Статус: не подтверждено",
+    ]
+    return "\n".join(lines)
+
+
+def _pairs(pairs: tuple[tuple[str, str], ...]) -> str:
+    shown = ", ".join(f"`{a}`–`{b}`" for a, b in pairs[:_LIST_LIMIT])
+    rest = len(pairs) - _LIST_LIMIT
+    return shown + (f" и ещё {rest}" if rest > 0 else "")
+
+
+def _selection_lines(
+    passport: RunPassport, graph: FactGraph, crosscheck: CrossCheckAnalysis | None
+) -> list[str]:
+    selection = graph.candidates
+    lines = [
+        f"- Возможных пар: {selection.possible_pairs} — полный перебор не выполняется.",
+        f"- Оценено пар (есть общая значимая основа слова): {selection.evaluated_pairs}.",
+        f"- Пар-кандидатов (общих основ не меньше {selection.min_shared}): "
+        f"{len(selection.pairs)}. Учитываются основы слов из 4 и более букв; числа, ID, "
+        "отрицания, служебные и модальные слова не учитываются — одинаковые числа пару "
+        "не образуют.",
+    ]
+    if selection.common_stems:
+        stems = ", ".join(selection.common_stems[:_LIST_LIMIT])
+        more = " …" if len(selection.common_stems) > _LIST_LIMIT else ""
+        lines.append(
+            "- Слишком общие основы (больше чем у половины требований) не учитывались: "
+            f"{_escape(stems)}{more}."
+        )
+    excluded = []
+    if selection.duplicates:
+        excluded.append(f"дословные повторы — {len(selection.duplicates)}")
+    if selection.linked:
+        excluded.append(f"уже связаны подтверждённой связью — {len(selection.linked)}")
+    if excluded:
+        lines.append("- Не кандидаты: " + "; ".join(excluded) + ".")
+    if crosscheck is None:
+        mode = " (режим --rules-only)" if passport.mode == "rules-only" else ""
+        lines.append(f"- Пары-кандидаты моделью не проверялись{mode}.")
+    elif crosscheck.disabled:
+        lines.append("- Проверка пар моделью отключена (LLM_MAX_PAIR_REQUESTS = 0).")
+    else:
+        lines += [
+            f"- Проверено моделью: {crosscheck.requests} из {crosscheck.candidates_total} "
+            f"(лимит LLM_MAX_PAIR_REQUESTS = {crosscheck.budget}).",
+            "- Покрытие: требований хотя бы в одной проверенной паре — "
+            f"{len(crosscheck.covered)} из {len(graph.nodes)}.",
+        ]
+    return lines
+
+
+def _gap_lines(graph: FactGraph, crosscheck: CrossCheckAnalysis | None) -> list[str]:
+    lines = [
+        f"- Вне графа: `{item.requirement_id}` — {_EXCLUDE_TITLES[item.code]}"
+        for item in graph.excluded
+    ]
+    for gap in graph.gaps:
+        if gap.kind == "conflict_outside_graph":
+            lines.append(f"- Замечание `{gap.target}`: {_escape(gap.detail)}")
+        else:
+            lines.append(
+                f"- Ссылка `{gap.requirement_id}` → «{_escape(gap.target)}»: {_escape(gap.detail)}"
+            )
+    unchecked = (
+        crosscheck.skipped
+        if crosscheck is not None
+        else tuple((pair.source_id, pair.target_id) for pair in graph.candidates.pairs)
+    )
+    if unchecked:
+        lines.append(
+            f"- Пары-кандидаты, не проверенные моделью: {len(unchecked)} — {_pairs(unchecked)}"
+        )
+    if crosscheck is not None and not crosscheck.disabled:
+        covered = set(crosscheck.covered)
+        alone = [node.requirement_id for node in graph.nodes if node.requirement_id not in covered]
+        if alone:
+            lines.append(
+                f"- Требования без проверенной пары: {len(alone)} — "
+                + ", ".join(f"`{rid}`" for rid in alone)
+                + ". Модель не сравнивала их ни с одним требованием — это не значит, что "
+                "связей нет."
+            )
+    return lines
+
+
+def _no_relation_hypotheses(crosscheck: CrossCheckAnalysis) -> str:
+    if crosscheck.rejected:
+        return (
+            f"Принятых гипотез нет: все предложенные моделью связи ({len(crosscheck.rejected)}) "
+            "отклонены — причины ниже."
+        )
+    return (
+        "Модель не предложила связей по проверенным парам "
+        f"({crosscheck.requests} из {crosscheck.candidates_total})."
+    )
+
+
+def _graph_section(
+    passport: RunPassport, graph: FactGraph, crosscheck: CrossCheckAnalysis | None
+) -> str:
+    parts = ["## 6. Связи между требованиями (Fact Graph)"]
+    if not graph.nodes:
+        parts.append(
+            "Узлов нет: в документе не найдено атомарных требований с текстом и привязкой к "
+            "источнику — связи не строились."
+        )
+        gaps = _gap_lines(graph, crosscheck)
+        if gaps:
+            parts += ["### Пропуски", "\n".join(gaps)]
+        return "\n\n".join(parts)
+    hypotheses = crosscheck.hypotheses if crosscheck is not None else ()
+    parts += [
+        "Узлы графа — атомарные требования с текстом и привязкой к источнику: "
+        f"{len(graph.nodes)} из {graph.requirements_total}. Подтверждённая связь — только "
+        "доказанная машинной проверкой обоих концов: явная ссылка на ID требования (XRF-01) "
+        "или разные значения одного параметра в одной таблице (CON-03); обе цитаты прошли "
+        "Evidence Gate. Совпадение слов или чисел связью не считается — по нему только "
+        "отбираются пары для проверки моделью. Связи, предложенные моделью, — гипотезы: "
+        "проверены цитаты, а не сама связь.",
+        _grid(
+            ("Тип связи", "Подтверждено", "Гипотезы LLM"),
+            [
+                (
+                    f"{relation} — {RELATION_TITLES[relation]}",
+                    str(graph.count(relation, "rule")),
+                    str(sum(1 for finding in hypotheses if finding.relation == relation)),
+                )
+                for relation in RELATION_TYPES
+            ],
+        ),
+        "### Отбор пар для проверки моделью",
+        "\n".join(_selection_lines(passport, graph, crosscheck)),
+    ]
+    verified = [edge for edge in graph.edges if edge.origin == "rule"]
+    parts.append(f"### Подтверждённые связи ({len(verified)})")
+    if not verified:
+        parts.append(
+            "Подтверждённых связей нет: явных ссылок между требованиями и разных значений "
+            "одного параметра в одной таблице не найдено."
+        )
+    number = 0
+    for edge in verified:
+        number += 1
+        parts.append(_edge_block(number, edge))
+    if crosscheck is not None and crosscheck.requests:
+        parts += [
+            f"### Гипотезы модели о связях ({len(hypotheses)}, не подтверждены)",
+            "> Гипотеза — предположение модели о связи двух требований. Evidence Gate "
+            "проверил только цитаты: они точно и однозначно найдены в текстах обоих "
+            "требований этой версии документа. Сама связь не проверена: гипотеза о "
+            "противоречии не означает, что противоречие установлено.",
+        ]
+        if not hypotheses:
+            parts.append(_no_relation_hypotheses(crosscheck))
+        for finding in hypotheses:
+            number += 1
+            parts.append(_relation_hypothesis_block(number, finding))
+    if crosscheck is not None and crosscheck.rejected:
+        parts += [
+            f"### Отклонённые гипотезы связей ({len(crosscheck.rejected)})",
+            "\n".join(
+                f"- пара `{item.pair[0]}`–`{item.pair[1]}`, элемент ответа № {item.index + 1}: "
+                f"{_escape(' '.join(item.reasons))}"
+                for item in crosscheck.rejected
+            ),
+        ]
+    if graph.rejected:
+        parts += [
+            f"### Связи правил, отклонённые проверкой доказательств ({len(graph.rejected)})",
+            "\n".join(
+                f"- `{item.finding.id}`: {_escape('; '.join(item.reasons))}"
+                for item in graph.rejected
+            ),
+        ]
+    gaps = _gap_lines(graph, crosscheck)
+    parts += [
+        "### Пропуски",
+        "\n".join(gaps)
+        if gaps
+        else "Пропусков нет: все ссылки сведены к связям, все пары-кандидаты проверены.",
+    ]
+    return "\n\n".join(parts)
+
+
 def render_report(
     passport: RunPassport,
     document: Document,
     segmentation: Segmentation | None = None,
     lint: LintResult | None = None,
     llm: LLMAnalysis | None = None,
+    *,
+    graph: FactGraph | None = None,
+    crosscheck: CrossCheckAnalysis | None = None,
 ) -> str:
     sections = [
         f"# Отчёт о проверке требований: {_cell(passport.document_name)}",
@@ -421,9 +674,12 @@ def render_report(
     llm_section = _llm_section(passport, llm)
     if llm_section is not None:
         sections.append(llm_section)
+    if graph is not None:
+        sections.append(_graph_section(passport, graph, crosscheck))
     sections.append(
-        "> Агент на этапе 6: замечания правил подтверждены Evidence Gate; LLM-обзор каждого "
-        "требования даёт гипотезы, прошедшие проверку цитат, но не смысла — смысловая проверка "
-        "появится на следующих этапах."
+        "> Агент на этапе 7: замечания правил и связи графа, доказанные машинной проверкой, "
+        "подтверждены Evidence Gate; LLM-обзор требований и проверка пар дают гипотезы с "
+        "проверенными цитатами, но непроверенным смыслом — смысловая проверка появится на "
+        "следующих этапах."
     )
     return "\n\n".join(sections) + "\n"

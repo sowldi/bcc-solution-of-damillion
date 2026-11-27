@@ -6,10 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.graph_helpers import load, relation, relations_json
 from tests.llm_helpers import findings_json, hypothesis
+from validator.graph import build_fact_graph
 from validator.ingest import load_document
 from validator.lint import LintResult, run_lint
 from validator.llm import LLMOptions, review_requirements
+from validator.llm.crosscheck import crosscheck_pairs
 from validator.llm.fake import FakeProvider
 from validator.model import Block, Document, Location
 from validator.passport import RunPassport
@@ -255,7 +258,7 @@ def test_report_footer_names_current_stage(tmp_path: Path) -> None:
 
     text = render_report(_passport(NOON), document, segmentation, lint)
 
-    assert "> Агент на этапе 6:" in text
+    assert "> Агент на этапе 7:" in text
     assert text.rstrip().endswith("смысловая проверка появится на следующих этапах.")
 
 
@@ -403,3 +406,111 @@ def test_full_partial_and_budget_coverage_wording(tmp_path: Path) -> None:
     assert "Требования без LLM-обзора" not in full
     assert "по проверенным требованиям (1 из 2)" in partial
     assert "- `Ф-2` — лимит запросов LLM_MAX_REQUESTS" in partial
+
+
+# --- раздел 6: Fact Graph -----------------------------------------------------------------
+
+CONFLICT = relation(
+    "Ф-3", "не хранит бронь книги дольше 3 дней", "Ф-4", "хранит бронь книги 5 дней"
+)
+
+
+def _section6(
+    tmp_path: Path, *replies: str, max_pair_requests: int = 10, rules_only: bool = False
+) -> str:
+    built = load(tmp_path)
+    passport = _passport(NOON)
+    crosscheck = None
+    if rules_only:
+        passport = replace(passport, provider=None, model=None, mode="rules-only")
+    else:
+        options = LLMOptions(max_retries=0, max_pair_requests=max_pair_requests)
+        crosscheck = crosscheck_pairs(
+            built.document, built.segmentation, built.graph, FakeProvider(*replies), options
+        )
+    text = render_report(
+        passport,
+        built.document,
+        built.segmentation,
+        built.lint,
+        graph=built.graph,
+        crosscheck=crosscheck,
+    )
+    start = text.index("## 6. Связи между требованиями (Fact Graph)")
+    return text[start : text.index("> Агент на этапе 7:")]
+
+
+def test_graph_section_shows_verified_dependency_with_both_quotes(tmp_path: Path) -> None:
+    section = _section6(tmp_path)
+
+    assert "### Подтверждённые связи (1)" in section
+    assert "**6.1. `Ф-2` зависит от `Ф-1`** — XRF-01 · Явная ссылка на требование" in section
+    assert "- Цитата `Ф-2`: «Ф-1» — " in section
+    assert "- Цитата `Ф-1`: «Ф-1. Библиотекарь подтверждает бронь книги" in section
+    assert "- Статус: подтверждено" in section
+    assert "| depends_on — зависит от | 1 | 0 |" in section
+
+
+def test_graph_hypotheses_are_never_reported_as_established(tmp_path: Path) -> None:
+    section = _section6(tmp_path, relations_json(CONFLICT))
+
+    assert "### Гипотезы модели о связях (1, не подтверждены)" in section
+    assert "**6.2. Возможное противоречие: `Ф-3` и `Ф-4`**" in section
+    assert "- Цитата `Ф-3`: «не хранит бронь книги дольше 3 дней» — " in section
+    assert "- Происхождение цитат: проверено Evidence Gate" in section
+    assert "- Связь: не проверена — это гипотеза модели" in section
+    assert "- Статус: не подтверждено" in section
+    assert "| conflicts_with — противоречит | 0 | 1 |" in section
+    lowered = section.casefold()
+    for claim in ("содержит противоречие", "противоречие подтверждено", "противоречие установлено"):
+        assert claim not in lowered.replace("не означает, что противоречие установлено", "")
+
+
+def test_graph_section_explains_selection_budget_and_coverage(tmp_path: Path) -> None:
+    built = load(tmp_path)
+    total = len(built.graph.candidates.pairs)
+
+    section = _section6(tmp_path, max_pair_requests=2)
+
+    assert "- Возможных пар: 36 — полный перебор не выполняется." in section
+    assert f"- Пар-кандидатов (общих основ не меньше 2): {total}." in section
+    assert "одинаковые числа пару не образуют" in section
+    assert "уже связаны подтверждённой связью — 1" in section
+    assert f"- Проверено моделью: 2 из {total} (лимит LLM_MAX_PAIR_REQUESTS = 2)." in section
+    assert "- Покрытие: требований хотя бы в одной проверенной паре — 3 из 9." in section
+    assert f"- Пары-кандидаты, не проверенные моделью: {total - 2}" in section
+    assert "- Требования без проверенной пары: 6" in section
+
+
+def test_graph_section_lists_gaps_and_rejected_hypotheses(tmp_path: Path) -> None:
+    foreign = relation("Ф-3", "хранит бронь книги 5 дней", "Ф-4", "хранит бронь книги 5 дней")
+
+    section = _section6(tmp_path, relations_json(foreign))
+
+    assert "### Отклонённые гипотезы связей (1)" in section
+    assert "- пара `Ф-3`–`Ф-4`, элемент ответа № 1: Цитата из Ф-3" in section
+    assert "Принятых гипотез нет: все предложенные моделью связи (1) отклонены" in section
+    assert "- Ссылка `Ф-7` → «Ф-6»: составное требование" in section
+
+
+def test_rules_only_graph_section_says_pairs_were_not_checked(tmp_path: Path) -> None:
+    section = _section6(tmp_path, rules_only=True)
+
+    assert "### Подтверждённые связи (1)" in section
+    assert "- Пары-кандидаты моделью не проверялись (режим --rules-only)." in section
+    assert "Гипотезы модели о связях" not in section
+
+
+def test_disabled_pair_check_is_reported(tmp_path: Path) -> None:
+    section = _section6(tmp_path, max_pair_requests=0)
+
+    assert "- Проверка пар моделью отключена (LLM_MAX_PAIR_REQUESTS = 0)." in section
+
+
+def test_empty_graph_section(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(tmp_path, "# Заметки\n\nСправочный текст.\n")
+
+    graph = build_fact_graph(document, segmentation, lint)
+    text = render_report(_passport(NOON), document, segmentation, lint, graph=graph)
+
+    assert "Узлов нет: в документе не найдено атомарных требований" in text

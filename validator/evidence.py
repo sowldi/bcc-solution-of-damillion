@@ -31,6 +31,14 @@
 - пустая цитата допустима только для фрагмента, у которого в документе действительно нет
   текста (пустая строка таблицы), и только внутри области.
 
+Связь двух требований (relation задан, этап 7) — дополнительно:
+- ровно два разных атомарных требования (не заголовок, не строка шапки, не составное
+  требование), вид доказательства comparison, ровно две цитаты: первая — из источника,
+  вторая — из цели;
+- правило подтверждает только зависимость по явной ссылке: цитата источника — ID цели,
+  и этот ID принадлежит одному требованию. Смысловые связи (противоречие, условие,
+  связанность) правилом не подтверждаются — они остаются гипотезами.
+
 Статус: правило — «verified»; LLM — «unverified» даже при доказанной цитате: точная цитата
 доказывает происхождение текста, но не смысл замечания. Подтверждает гипотезы LLM только
 отдельная смысловая проверка (следующие этапы).
@@ -55,6 +63,7 @@ from validator.findings import (
     ABSENCE_CLAIMS,
     EVIDENCE_KINDS,
     ORIGINS,
+    RELATION_TYPES,
     REVIEW_CATEGORIES,
     RULE_CATEGORIES,
     SEVERITIES,
@@ -337,6 +346,8 @@ def _problems(
         for rid in dict.fromkeys(finding.requirement_ids)
         if rid not in covered
     ]
+    if finding.relation is not None:
+        problems += _relation_problems(finding, segmentation)
     if not problems:
         problems += _absence_problems(finding, segmentation, document)
     return problems
@@ -357,6 +368,8 @@ def _type_problems(finding: Finding) -> list[str]:
         problems.append(f"Поле review_category: недопустимое значение {finding.review_category!r}.")
     if finding.confidence is not None and not is_probability(finding.confidence):
         problems.append("Поле confidence: ожидается число от 0 до 1 — оценка модели.")
+    if finding.relation is not None and finding.relation not in RELATION_TYPES:
+        problems.append(f"Поле relation: недопустимый тип связи {finding.relation!r}.")
     if finding.absence is not None and not (
         isinstance(finding.absence, AbsenceClaim)
         and all(isinstance(getattr(finding.absence, f.name), str) for f in fields(AbsenceClaim))
@@ -509,6 +522,66 @@ def _location_problems(sources: tuple[SourceRef, ...], label: str) -> list[str]:
                 f"{label}: место доказательства в исходном файле не определено "
                 "(нет строки, страницы, абзаца или таблицы)."
             ]
+    return []
+
+
+# --- связь двух требований (этап 7) -------------------------------------------------------
+
+
+def _relation_problems(finding: Finding, segmentation: Segmentation) -> list[str]:
+    problems: list[str] = []
+    if finding.evidence_kind != "comparison":
+        problems.append(
+            "Связь доказывается сопоставлением цитат обоих требований (evidence_kind=comparison)."
+        )
+    if finding.review_category is not None:
+        problems.append("У связи не может быть категории обзора требования (review_category).")
+    ids = finding.requirement_ids
+    if len(ids) != 2:
+        return [*problems, f"Связь относится ровно к двум требованиям, указано: {len(ids)}."]
+    if ids[0] == ids[1]:
+        return [*problems, "Связь требования с самим собой не допускается."]
+    if tuple(evidence.requirement_id for evidence in finding.evidence) != ids:
+        problems.append(
+            "У связи ровно две цитаты: первая — из требования-источника, вторая — "
+            "из требования-цели."
+        )
+    atomic = {fragment.id: fragment for fragment in segmentation.atomic_requirements}
+    for rid in ids:
+        try:
+            segmentation.by_id(rid)
+        except KeyError:
+            continue  # неизвестный ID уже назван в причинах
+        if rid not in atomic:
+            problems.append(
+                f"Конец связи {rid} — не атомарное требование (заголовок, шапка таблицы, "
+                "составное требование): связь относится только к требованиям."
+            )
+    if finding.origin == "rule" and not problems:
+        problems += _rule_relation_problems(finding, atomic)
+    return problems
+
+
+def _rule_relation_problems(finding: Finding, atomic: Mapping[str, Requirement]) -> list[str]:
+    """Правило подтверждает связь, только если её доказывает сам текст: явная ссылка на ID."""
+    source_id, target_id = finding.requirement_ids
+    if finding.relation != "depends_on":
+        return [
+            "Правилом подтверждается только зависимость по явной ссылке на ID (depends_on); "
+            f"связь {finding.relation} — смысловая и остаётся гипотезой."
+        ]
+    doc_id = atomic[target_id].doc_id
+    if doc_id is None or finding.evidence[0].quote != doc_id:
+        return [
+            "Зависимость подтверждается правилом только явной ссылкой: цитата требования "
+            f"{source_id} должна быть ID требования {target_id}."
+        ]
+    owners = [fragment.id for fragment in atomic.values() if fragment.doc_id == doc_id]
+    if len(owners) != 1:
+        return [
+            f"ID «{doc_id}» принадлежит нескольким требованиям ({', '.join(owners)}) — "
+            "ссылка неоднозначна."
+        ]
     return []
 
 

@@ -22,6 +22,7 @@ from validator.errors import (
     ValidatorError,
 )
 from validator.evidence import ensure_source_unchanged
+from validator.graph import FactGraph, build_fact_graph
 from validator.ingest import SUPPORTED_SUFFIXES, load_document
 from validator.lint import run_lint
 from validator.model import Document
@@ -30,7 +31,7 @@ from validator.report import render_report, write_text_atomic
 from validator.segmentation import Segmentation, segment_document
 
 if TYPE_CHECKING:  # LLM-слой импортируется лениво — только в стандартном режиме
-    from validator.llm import LLMAnalysis
+    from validator.llm import CrossCheckAnalysis, LLMAnalysis
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -79,7 +80,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Предупреждение: {warning}", file=sys.stderr)
         segmentation = segment_document(document)
         lint = run_lint(document, segmentation)
-        analysis = None if settings is None else _run_llm(settings, document, segmentation)
+        graph = build_fact_graph(document, segmentation, lint)
+        analysis: LLMAnalysis | None = None
+        crosscheck: CrossCheckAnalysis | None = None
+        if settings is not None:
+            analysis, crosscheck = _run_llm(settings, document, segmentation, graph)
         passport = build_passport(
             document,
             settings,
@@ -89,7 +94,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if analysis is not None:  # в паспорте — провайдер, который действительно отвечал
             passport = replace(passport, provider=analysis.provider, model=analysis.model)
-        report = render_report(passport, document, segmentation, lint, analysis)
+        report = render_report(
+            passport, document, segmentation, lint, analysis, graph=graph, crosscheck=crosscheck
+        )
         # Доказательства привязаны к прочитанной версии файла: если файл изменился во время
         # проверки, отчёт был бы о другом документе — он не записывается.
         ensure_source_unchanged(document)
@@ -119,6 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"Гипотез LLM: {len(analysis.hypotheses)} (не подтверждены), "
             f"отклонено при разборе ответа: {len(analysis.rejected)}."
         )
+    _print_graph(graph, crosscheck)
     if lint.rejected:
         print(
             f"Предупреждение: {len(lint.rejected)} замечаний правил не прошли проверку "
@@ -129,12 +137,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     return EXIT_OK
 
 
-def _run_llm(settings: Settings, document: Document, segmentation: Segmentation) -> LLMAnalysis:
+def _print_graph(graph: FactGraph, crosscheck: CrossCheckAnalysis | None) -> None:
+    line = f"Связей: подтверждено {len(graph.edges)}"
+    if crosscheck is not None:
+        line += (
+            f", гипотез LLM {len(crosscheck.hypotheses)} (не подтверждены); пар-кандидатов "
+            f"{crosscheck.candidates_total}, проверено моделью {crosscheck.requests}."
+        )
+    else:
+        line += f"; пар-кандидатов {len(graph.candidates.pairs)} (моделью не проверялись)."
+    print(line)
+
+
+def _run_llm(
+    settings: Settings, document: Document, segmentation: Segmentation, graph: FactGraph
+) -> tuple[LLMAnalysis, CrossCheckAnalysis]:
     # Ленивый импорт: в режиме --rules-only LLM-слой не загружается вовсе.
     from validator import llm
 
     provider = llm.create_provider(settings)
     options = llm.LLMOptions.from_settings(settings)
+    # Один ограничитель частоты на прогон: обзор и проверка пар делят лимит LLM_RPM.
+    limiter = llm.RateLimiter(options.rpm) if options.rpm else None
     host = urlsplit(provider.endpoint).netloc or provider.endpoint
     print(
         f"LLM-обзор: требования ({len(segmentation.atomic_requirements)}) проверяются по одному "
@@ -142,7 +166,18 @@ def _run_llm(settings: Settings, document: Document, segmentation: Segmentation)
         f"{options.max_requests}.",
         file=sys.stderr,
     )
-    return llm.review_requirements(document, segmentation, provider, options)
+    analysis = llm.review_requirements(document, segmentation, provider, options, limiter=limiter)
+    print(
+        f"Проверка пар: пар-кандидатов {len(graph.candidates.pairs)}, проверяются по одной "
+        f"тем же провайдером; лимит запросов LLM_MAX_PAIR_REQUESTS: "
+        f"{options.max_pair_requests}"
+        + (" (проверка пар выключена)." if options.max_pair_requests == 0 else "."),
+        file=sys.stderr,
+    )
+    crosscheck = llm.crosscheck_pairs(
+        document, segmentation, graph, provider, options, limiter=limiter
+    )
+    return analysis, crosscheck
 
 
 def _force_utf8_console() -> None:

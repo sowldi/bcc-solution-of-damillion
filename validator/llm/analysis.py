@@ -32,6 +32,7 @@ class LLMOptions:
     temperature: float = 0.0
     max_retries: int = 4
     max_requests: int = 10  # бюджет: запросов (= требований) за прогон
+    max_pair_requests: int = 10  # бюджет проверки пар (этап 7): запросов (= пар); 0 — нет
     rpm: int | None = None  # None — без ограничения частоты
 
     @classmethod
@@ -41,6 +42,7 @@ class LLMOptions:
             temperature=settings.temperature,
             max_retries=settings.max_retries,
             max_requests=settings.max_requests,
+            max_pair_requests=settings.max_pair_requests,
             rpm=settings.rpm,
         )
 

@@ -29,7 +29,7 @@ import time
 
 from validator.errors import ProviderError
 from validator.evidence import build_evidence, gate_findings
-from validator.findings import Finding, ReviewCategory, RuleCategory, Severity
+from validator.findings import Evidence, Finding, ReviewCategory, RuleCategory, Severity
 from validator.llm.analysis import LLMAnalysis, LLMOptions, SkippedRequirement
 from validator.llm.base import LLMProvider, LLMRequest
 from validator.llm.errors import (
@@ -96,9 +96,13 @@ def review_requirements(
     *,
     sleep: Sleep = time.sleep,
     clock: Clock = time.monotonic,
+    limiter: RateLimiter | None = None,
 ) -> LLMAnalysis:
+    """limiter — общий ограничитель частоты прогона (обзор и проверка пар делят один лимит
+    LLM_RPM); без него создаётся свой по options.rpm."""
     targets = segmentation.atomic_requirements
-    limiter = RateLimiter(options.rpm, clock=clock, sleep=sleep) if options.rpm else None
+    if limiter is None and options.rpm:
+        limiter = RateLimiter(options.rpm, clock=clock, sleep=sleep)
     reviewed: list[str] = []
     skipped: list[SkippedRequirement] = []
     drafts: list[tuple[int, Finding]] = []
@@ -258,28 +262,10 @@ def _to_finding(
             f"Ответ относится к требованию {hypothesis.requirement_id}, а проверялось "
             f"{fragment.id}: ID требования по ответу модели не меняется."
         ]
-    quote = hypothesis.evidence_quote
-    occurrences = fragment.text.count(quote)
-    if occurrences == 0:
-        return ["Гипотеза без доказательства: цитата не найдена дословно в тексте требования."]
-    if occurrences > 1:
-        return [
-            f"Цитата встречается в требовании несколько раз ({occurrences}) — место "
-            "доказательства неоднозначно."
-        ]
-    start = fragment.text.index(quote)
-    # Цитата должна указывать на содержание требования: ID («Ф-1.»), номер пункта и
-    # короткое служебное слово («по», «и») встречаются один раз, но проблему не показывают.
-    content = fragment.text[max(start, body_start(fragment, document)) : start + len(quote)]
-    if not _meaningful(content):
-        return [
-            "Цитата слишком короткая или служебная (только ID требования, номер пункта или "
-            "служебные слова) — она не указывает на проблему в тексте требования."
-        ]
-    try:
-        evidence = build_evidence(fragment, start, start + len(quote), document)
-    except ValueError as error:
-        return [str(error)]
+    evidence = locate_quote(fragment, hypothesis.evidence_quote, document)
+    if not isinstance(evidence, Evidence):
+        return evidence
+    start = evidence.start
     category, criterion, severity = REVIEW_MAPPING[hypothesis.category]
     return Finding(
         id=f"{RULE_ID}:{fragment.id}@{start}:{hypothesis.category}",
@@ -300,3 +286,30 @@ def _to_finding(
         review_category=hypothesis.category,
         confidence=hypothesis.confidence,
     )
+
+
+def locate_quote(fragment: Requirement, quote: str, document: Document) -> Evidence | list[str]:
+    """Цитата модели → доказательство из текста требования или причины отказа.
+
+    Цитата должна один раз дословно встречаться в тексте и указывать на содержание: ID
+    («Ф-1.»), номер пункта и служебное слово («по», «и») проблему не показывают.
+    """
+    occurrences = fragment.text.count(quote)
+    if occurrences == 0:
+        return ["Гипотеза без доказательства: цитата не найдена дословно в тексте требования."]
+    if occurrences > 1:
+        return [
+            f"Цитата встречается в требовании несколько раз ({occurrences}) — место "
+            "доказательства неоднозначно."
+        ]
+    start = fragment.text.index(quote)
+    content = fragment.text[max(start, body_start(fragment, document)) : start + len(quote)]
+    if not _meaningful(content):
+        return [
+            "Цитата слишком короткая или служебная (только ID требования, номер пункта или "
+            "служебные слова) — она не указывает на проблему в тексте требования."
+        ]
+    try:
+        return build_evidence(fragment, start, start + len(quote), document)
+    except ValueError as error:
+        return [str(error)]

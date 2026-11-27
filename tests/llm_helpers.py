@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -68,10 +68,20 @@ def hypothesis(requirement_id: str, quote: str, **changes: Any) -> dict[str, Any
     return item
 
 
-class StubServer:
-    """HTTP-сервер на 127.0.0.1: отдаёт ответы из очереди (последний повторяется)."""
+def by_task(review: Reply, pairs: Reply) -> Callable[[bytes], Reply]:
+    """Ответ по виду запроса: проверка пары (этап 7) или обзор одного требования (этап 6)."""
 
-    def __init__(self, *replies: Reply) -> None:
+    def route(body: bytes) -> Reply:
+        return pairs if b"relations" in body else review
+
+    return route
+
+
+class StubServer:
+    """HTTP-сервер на 127.0.0.1: отдаёт ответы из очереди (последний повторяется) или,
+    если задан route, — ответ по телу запроса."""
+
+    def __init__(self, *replies: Reply, route: Callable[[bytes], Reply] | None = None) -> None:
         self.replies = list(replies)
         self.received: list[Received] = []
         stub = self
@@ -81,7 +91,10 @@ class StubServer:
                 length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(length)
                 stub.received.append(Received(self.path, dict(self.headers.items()), body))
-                reply = stub.replies.pop(0) if len(stub.replies) > 1 else stub.replies[0]
+                if route is not None:
+                    reply = route(body)
+                else:
+                    reply = stub.replies.pop(0) if len(stub.replies) > 1 else stub.replies[0]
                 if reply.delay:
                     time.sleep(reply.delay)
                 self.send_response(reply.status)
@@ -114,6 +127,8 @@ class StubServer:
 
 
 @contextmanager
-def stub_server(*replies: Reply) -> Iterator[StubServer]:
-    with StubServer(*replies) as server:
+def stub_server(
+    *replies: Reply, route: Callable[[bytes], Reply] | None = None
+) -> Iterator[StubServer]:
+    with StubServer(*replies, route=route) as server:
         yield server
