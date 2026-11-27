@@ -358,3 +358,48 @@ def test_llm_hypothesis_separates_quote_origin_from_meaning(tmp_path: Path) -> N
 
     assert "- Происхождение цитаты: проверено Evidence Gate" in text
     assert "- Смысл замечания: не проверен — это гипотеза модели" in text
+
+
+# --- Stage 6.2 (F): честное покрытие в разделе 5 -------------------------------------------
+
+
+def _section5(
+    tmp_path: Path, markdown: str, reply: str = '{"findings": []}', **options: int
+) -> str:
+    document, segmentation, lint = _linted(tmp_path, markdown)
+    analysis = review_requirements(
+        document, segmentation, FakeProvider(reply), LLMOptions(max_retries=0, **options)
+    )
+    passport = replace(_passport(NOON), llm_used=True, provider="fake", model="fake-model")
+    text = render_report(passport, document, segmentation, lint, analysis)
+    return text.split("## 5.")[1].split("> Агент на этапе")[0]
+
+
+def test_only_rejected_hypotheses_are_not_reported_as_no_hypotheses(tmp_path: Path) -> None:
+    reply = findings_json(hypothesis("Ф-1", "нет такой цитаты"))
+
+    section = _section5(tmp_path, LLM_SPEC, reply)
+
+    assert "Модель не предложила гипотез" not in section
+    assert "Принятых гипотез нет: все предложенные моделью гипотезы (1) отклонены" in section
+    assert "### Отклонённые ответы модели (1)" in section
+
+
+def test_zero_coverage_does_not_look_like_a_review(tmp_path: Path) -> None:
+    section = _section5(tmp_path, "# Заметки\n\nСправочный текст.\n")
+
+    assert "Проверено требований: 0 из 0" in section
+    assert "LLM-обзор не выполнен: модель не получила ни одного требования." in section
+    assert "Модель не предложила гипотез" not in section
+
+
+def test_full_partial_and_budget_coverage_wording(tmp_path: Path) -> None:
+    spec = LLM_SPEC + "* Ф-2. Читатель отменяет бронь.\n"
+
+    full = _section5(tmp_path, spec)
+    partial = _section5(tmp_path, spec, max_requests=1)
+
+    assert "Модель не предложила гипотез." in full
+    assert "Требования без LLM-обзора" not in full
+    assert "по проверенным требованиям (1 из 2)" in partial
+    assert "- `Ф-2` — лимит запросов LLM_MAX_REQUESTS" in partial

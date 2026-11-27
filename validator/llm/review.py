@@ -11,7 +11,8 @@
    (противоречия, зависимости) — не задача этого этапа.
 3. Ответ проверяется строгой схемой. Гипотеза принимается в работу, только если относится
    именно к проверяемому требованию (ID по ответу модели не меняется), её цитата один раз
-   дословно встречается в его тексте и содержательна (не ID и не короткое служебное слово).
+   дословно встречается в его тексте и содержательна: есть число или неслужебное слово
+   («ID», «ПД», «5 ₸» — да; только ID требования, «по», «и» — нет).
    При сбое провайдера обзор прерывается той же ошибкой с указанием требования и прогресса.
 4. Все гипотезы проходят Evidence Gate этапа 5. Прошедшие получают статус «unverified»:
    точная цитата доказывает происхождение текста, но не вывод модели. Отклонённые
@@ -31,7 +32,16 @@ from validator.evidence import build_evidence, gate_findings
 from validator.findings import Finding, ReviewCategory, RuleCategory, Severity
 from validator.llm.analysis import LLMAnalysis, LLMOptions, SkippedRequirement
 from validator.llm.base import LLMProvider, LLMRequest
-from validator.llm.errors import ProviderRateLimitError
+from validator.llm.errors import (
+    ProviderAuthError,
+    ProviderModelError,
+    ProviderNetworkError,
+    ProviderRateLimitError,
+    ProviderRequestError,
+    ProviderResponseError,
+    ProviderServerError,
+    ProviderTimeoutError,
+)
 from validator.llm.prompts import PROMPT_VERSION, SYSTEM_PROMPT, build_user_message
 from validator.llm.retry import Clock, RateLimiter, Sleep, complete_with_retry
 from validator.llm.schema import Hypothesis, RejectedHypothesis, parse_hypotheses
@@ -42,8 +52,29 @@ from validator.segmentation.verify import body_start
 log = logging.getLogger("validator.llm")
 
 RULE_ID = "LLM"
-# Содержательная цитата: хотя бы одно слово или число из трёх и более символов.
-_MEANINGFUL = re.compile(r"[^\W_]{3,}")
+# Содержательная цитата (Stage 6.2): в части после ID требования есть число («5 ₸», «≤ 5»,
+# «2FA») или слово из двух и более букв, которое не служебное («ID», «OK», «ПД», «Да»).
+# Длина сама по себе не делает цитату содержательной: «и по» — по-прежнему служебная.
+_TOKEN = re.compile(r"[^\W_]+")
+_FUNCTION_WORDS = frozenset(
+    {
+        "и", "а", "но", "или", "либо", "в", "во", "на", "по", "с", "со", "к", "ко", "о",
+        "об", "от", "до", "из", "за", "для", "при", "без", "под", "над", "у", "не", "ни",
+        "же", "ли", "бы", "то", "как", "что", "это", "так",
+        "a", "an", "the", "of", "to", "in", "on", "at", "by", "for", "and", "or", "not",
+        "is", "be", "as", "it",
+    }
+)  # fmt: skip
+_FAILURE_KINDS: tuple[tuple[type[ProviderError], str], ...] = (
+    (ProviderTimeoutError, "таймаут"),
+    (ProviderNetworkError, "сеть недоступна"),
+    (ProviderRateLimitError, "превышен лимит запросов (HTTP 429)"),
+    (ProviderServerError, "сбой на стороне провайдера (HTTP 5xx)"),
+    (ProviderAuthError, "ключ не принят или нет доступа"),
+    (ProviderModelError, "модель не найдена"),
+    (ProviderRequestError, "запрос отклонён провайдером"),
+    (ProviderResponseError, "непригодный ответ модели"),
+)
 
 # Категория обзора → (группа замечаний, критерий качества, предполагаемая важность).
 REVIEW_MAPPING: dict[ReviewCategory, tuple[RuleCategory, str, Severity]] = {
@@ -73,6 +104,8 @@ def review_requirements(
     drafts: list[tuple[int, Finding]] = []
     rejected: list[RejectedHypothesis] = []
     offset = 0
+    # Сначала выбор: что уйдёт модели в этом обзоре, а что нет и почему (до первого запроса).
+    selected: list[Requirement] = []
     for fragment in targets:
         problem = _not_reviewable(fragment, document)
         if problem is not None:
@@ -80,7 +113,7 @@ def review_requirements(
             continue
         # Одинаковый текст с другим ID — другое требование со своим контекстом (раздел,
         # родитель): оно проверяется отдельно, требования не объединяются (Stage 6.1).
-        if len(reviewed) >= options.max_requests:
+        if len(selected) >= options.max_requests:
             skipped.append(
                 SkippedRequirement(
                     fragment.id,
@@ -89,6 +122,8 @@ def review_requirements(
                 )
             )
             continue
+        selected.append(fragment)
+    for position, fragment in enumerate(selected):
         reviewed.append(fragment.id)
         parent = _parent(fragment, segmentation)
         request = LLMRequest(
@@ -107,8 +142,10 @@ def review_requirements(
             # на каком требовании прервался обзор и сколько требований успели проверить.
             raise _interrupted(
                 error,
-                f"LLM-обзор прерван на требовании {fragment.id}: до сбоя проверено "
-                f"{len(reviewed) - 1} из {len(targets)}; частичные результаты не сохраняются. "
+                f"LLM-обзор прерван на требовании {fragment.id}. Тип сбоя: "
+                f"{_failure_kind(error)}. До сбоя проверено {position} из {len(selected)} "
+                f"запланированных в этом обзоре (атомарных требований в документе: "
+                f"{len(targets)}); частичные результаты не сохраняются. "
                 f"Причина ({provider.name}): {error}",
             ) from None
         rejected += [
@@ -166,6 +203,23 @@ def review_requirements(
     )
 
 
+def _meaningful(content: str) -> bool:
+    """Есть число или неслужебное слово из двух и более символов."""
+    for token in _TOKEN.findall(content):
+        if any(char.isdigit() for char in token):
+            return True
+        if len(token) >= 2 and token.casefold() not in _FUNCTION_WORDS:
+            return True
+    return False
+
+
+def _failure_kind(error: ProviderError) -> str:
+    for error_type, title in _FAILURE_KINDS:
+        if isinstance(error, error_type):
+            return title
+    return "ошибка провайдера"
+
+
 def _interrupted(error: ProviderError, message: str) -> ProviderError:
     """Та же ошибка с контекстом частичного сбоя: тип и код выхода не меняются."""
     if isinstance(error, ProviderRateLimitError):
@@ -217,10 +271,10 @@ def _to_finding(
     # Цитата должна указывать на содержание требования: ID («Ф-1.»), номер пункта и
     # короткое служебное слово («по», «и») встречаются один раз, но проблему не показывают.
     content = fragment.text[max(start, body_start(fragment, document)) : start + len(quote)]
-    if not _MEANINGFUL.search(content):
+    if not _meaningful(content):
         return [
-            "Цитата слишком короткая или служебная (только ID, номер пункта или короткое "
-            "слово) — она не указывает на проблему в тексте требования."
+            "Цитата слишком короткая или служебная (только ID требования, номер пункта или "
+            "служебные слова) — она не указывает на проблему в тексте требования."
         ]
     try:
         evidence = build_evidence(fragment, start, start + len(quote), document)

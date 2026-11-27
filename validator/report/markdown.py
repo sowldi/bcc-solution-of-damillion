@@ -336,6 +336,23 @@ def _hypothesis_block(number: int, finding: Finding) -> str:
     return "\n".join(lines)
 
 
+def _no_hypotheses(analysis: LLMAnalysis) -> str:
+    """Почему в разделе нет гипотез — так, чтобы непроверенное не выглядело проверенным."""
+    if analysis.requirements_sent == 0:
+        return "LLM-обзор не выполнен: модель не получила ни одного требования."
+    if analysis.rejected:
+        return (
+            f"Принятых гипотез нет: все предложенные моделью гипотезы ({len(analysis.rejected)}) "
+            "отклонены — причины ниже."
+        )
+    if analysis.skipped:
+        return (
+            "Модель не предложила гипотез по проверенным требованиям "
+            f"({analysis.requirements_sent} из {analysis.requirements_total})."
+        )
+    return "Модель не предложила гипотез."
+
+
 def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | None:
     if analysis is None:
         if passport.mode == "rules-only":
@@ -359,12 +376,7 @@ def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | N
         "но не смысл замечания — статус остаётся «не подтверждено» до смысловой проверки.",
     ]
     if not analysis.hypotheses:
-        parts.append(
-            "Модель не предложила гипотез по проверенным требованиям "
-            f"({analysis.requirements_sent} из {analysis.requirements_total})."
-            if analysis.skipped
-            else "Модель не предложила гипотез."
-        )
+        parts.append(_no_hypotheses(analysis))
     parts += [
         _hypothesis_block(number, finding) for number, finding in enumerate(analysis.hypotheses, 1)
     ]

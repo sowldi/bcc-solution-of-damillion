@@ -679,3 +679,110 @@ def test_rate_limited_requirement_waits_retry_after_within_limiter(tmp_path: Pat
 
     # пауза Retry-After (5 с), затем интервалы лимитера перед каждым следующим запросом
     assert sleeps == [5.0, 1.0, 1.0, 1.0]
+
+
+# --- Stage 6.2 (A): короткие, но содержательные цитаты ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "quote"),
+    [
+        ("Поле ID обязательно.", "ID"),
+        ("Ответ — OK или ошибка.", "OK"),
+        ("Вызов идёт через API банка.", "API"),
+        ("Хранить ПД в РК.", "ПД"),
+        ("Да.", "Да"),
+        ("Лимит — 5 ₸.", "5 ₸"),
+        ("Сумма перевода ≤ 5 млн.", "≤ 5"),
+        ("Вход только по 2FA.", "2FA"),
+    ],
+)
+def test_short_meaningful_quote_is_accepted(tmp_path: Path, text: str, quote: str) -> None:
+    markdown = HEAD + f"* Ф-1. {text}\n"
+    reply = findings_json(hypothesis("Ф-1", quote, category="undefined_term"))
+
+    analysis, *_ = _review(tmp_path, reply, markdown=markdown)
+
+    [finding] = analysis.hypotheses
+    assert finding.evidence[0].quote == quote
+    assert finding.evidence_status == "unverified"
+
+
+@pytest.mark.parametrize(
+    ("text", "quote"),
+    [
+        ("Читатель бронирует книгу и по заявке.", "и по"),  # одни служебные слова
+        ("По заявке читатель бронирует книгу.", "Ф-1. По"),  # префикс ID + служебное слово
+    ],
+)
+def test_function_words_or_prefix_stay_meaningless_even_if_longer(
+    tmp_path: Path, text: str, quote: str
+) -> None:
+    markdown = HEAD + f"* Ф-1. {text}\n"
+
+    analysis, *_ = _review(tmp_path, findings_json(hypothesis("Ф-1", quote)), markdown=markdown)
+
+    assert analysis.hypotheses == ()
+    assert "служебн" in _reasons(analysis)
+
+
+# --- Stage 6.2 (C): повторы не расходуют бюджет ---------------------------------------------
+
+
+def test_retries_do_not_consume_the_requirement_budget(tmp_path: Path) -> None:
+    analysis, provider, *_ = _review(
+        tmp_path,
+        ProviderTimeoutError("нет ответа"),
+        EMPTY,
+        EMPTY,
+        options=LLMOptions(max_retries=1, max_requests=2),
+    )
+
+    assert analysis.reviewed == ("Ф-1", "Ф-2")
+    assert len(provider.requests) == 3  # повтор Ф-1 сверх бюджета требований
+    assert [s.code for s in analysis.skipped] == ["budget"]
+
+
+# --- Stage 6.2 (D): сообщение о частичном сбое ------------------------------------------------
+
+
+MANY = HEAD + "".join(f"* Ф-{n}. Читатель бронирует книгу номер {n}.\n" for n in range(1, 13))
+
+
+@pytest.mark.parametrize(
+    ("replies", "kind", "failed_at", "done"),
+    [
+        ((ProviderTimeoutError("нет ответа за 120 с"),), "таймаут", "Ф-1", 0),
+        ((EMPTY, ProviderServerError("HTTP 503")), "сбой на стороне провайдера", "Ф-2", 1),
+        (
+            (EMPTY, EMPTY, EMPTY, ProviderRateLimitError("HTTP 429", retry_after=3)),
+            "превышен лимит запросов",
+            "Ф-4",
+            3,
+        ),
+    ],
+)
+def test_partial_failure_message_names_type_requirement_and_progress(
+    tmp_path: Path, replies: tuple[Any, ...], kind: str, failed_at: str, done: int
+) -> None:
+    options = LLMOptions(max_retries=0, max_requests=10)
+
+    with pytest.raises(type(replies[-1])) as caught:
+        _review(tmp_path, *replies, markdown=MANY, options=options)
+
+    message = str(caught.value)
+    assert f"Тип сбоя: {kind}" in message
+    assert f"прерван на требовании {failed_at}" in message
+    assert f"проверено {done} из 10 запланированных в этом обзоре" in message
+    assert "атомарных требований в документе: 12" in message
+    assert "частичные результаты не сохраняются" in message
+
+
+def test_exhausted_retry_budget_is_reported(tmp_path: Path) -> None:
+    timeout = ProviderTimeoutError("нет ответа")
+
+    with pytest.raises(ProviderTimeoutError) as caught:
+        _review(tmp_path, timeout, timeout, options=LLMOptions(max_retries=1))
+
+    assert "попыток: 2" in str(caught.value)
+    assert "Тип сбоя: таймаут" in str(caught.value)
