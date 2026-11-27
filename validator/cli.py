@@ -27,6 +27,7 @@ from validator.ingest import SUPPORTED_SUFFIXES, load_document
 from validator.lint import run_lint
 from validator.model import Document
 from validator.passport import build_passport
+from validator.quality import QualityResult, analyze_quality
 from validator.report import render_report, write_text_atomic
 from validator.segmentation import Segmentation, segment_document
 
@@ -85,6 +86,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         crosscheck: CrossCheckAnalysis | None = None
         if settings is not None:
             analysis, crosscheck = _run_llm(settings, document, segmentation, graph)
+        quality = analyze_quality(document, segmentation, lint, graph)
+        if crosscheck is not None:
+            quality = quality.with_hypotheses(crosscheck.hypotheses)
         passport = build_passport(
             document,
             settings,
@@ -95,7 +99,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if analysis is not None:  # в паспорте — провайдер, который действительно отвечал
             passport = replace(passport, provider=analysis.provider, model=analysis.model)
         report = render_report(
-            passport, document, segmentation, lint, analysis, graph=graph, crosscheck=crosscheck
+            passport,
+            document,
+            segmentation,
+            lint,
+            analysis,
+            graph=graph,
+            crosscheck=crosscheck,
+            quality=quality,
         )
         # Доказательства привязаны к прочитанной версии файла: если файл изменился во время
         # проверки, отчёт был бы о другом документе — он не записывается.
@@ -127,6 +138,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"отклонено при разборе ответа: {len(analysis.rejected)}."
         )
     _print_graph(graph, crosscheck)
+    _print_quality(quality)
     if lint.rejected:
         print(
             f"Предупреждение: {len(lint.rejected)} замечаний правил не прошли проверку "
@@ -151,6 +163,15 @@ def _print_graph(graph: FactGraph, crosscheck: CrossCheckAnalysis | None) -> Non
     else:
         line += f"; пар-кандидатов {kept} (моделью не проверялись)."
     print(line)
+
+
+def _print_quality(quality: QualityResult) -> None:
+    scenarios = sum(1 for finding in quality.findings if finding.rule_id == "ACC-01")
+    print(
+        f"Противоречий: подтверждено {len(quality.confirmed)}, потенциальных "
+        f"{len(quality.potential)}; критериев приёмки: {len(quality.acceptance)}, "
+        f"сценариев без ожидаемого результата: {scenarios}."
+    )
 
 
 def _run_llm(

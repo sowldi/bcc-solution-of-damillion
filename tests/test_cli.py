@@ -549,3 +549,39 @@ def test_rules_only_builds_the_deterministic_graph(
     assert "`Ф-2` зависит от `Ф-1`" in text
     assert "Пары-кандидаты моделью не проверялись (режим --rules-only)" in text
     assert "Связей: подтверждено 1" in capsys.readouterr().out
+
+
+# --- этап 8: противоречия и критерии приёмки --------------------------------------------
+
+QUALITY_DOC = (
+    "# Сервис\n\n## Функциональные требования\n\n"
+    "* Ф-1. Срок хранения брони: не более 3 дней.\n* Ф-2. Срок хранения брони — 5 дней.\n"
+)
+
+
+def test_rules_only_reports_confirmed_contradictions(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spec = tmp_path / "quality.md"
+    spec.write_text(QUALITY_DOC, encoding="utf-8")
+    report = tmp_path / "report.md"
+
+    assert main([str(spec), str(report), "--rules-only"]) == EXIT_OK
+
+    text = report.read_text(encoding="utf-8")
+    assert "## 7. Противоречия, критерии приёмки и полнота" in text
+    assert "CTR-01 · Несовместимые ограничения одного параметра" in text
+    assert "Противоречий: подтверждено 1, потенциальных 0" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("offline_llm")
+def test_standard_run_includes_the_quality_section(tmp_path: Path) -> None:
+    spec = tmp_path / "quality.md"
+    spec.write_text(QUALITY_DOC, encoding="utf-8")
+    report = tmp_path / "report.md"
+
+    assert main([str(spec), str(report)]) == EXIT_OK
+
+    text = report.read_text(encoding="utf-8")
+    assert "## 7. Противоречия, критерии приёмки и полнота" in text
+    assert "- Модель проверила " in text

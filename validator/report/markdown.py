@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,7 @@ from validator.ingest.common import one_line
 from validator.lint import LintResult
 from validator.model import FORMAT_TITLES, Document
 from validator.passport import RunPassport
+from validator.quality import Contradiction, QualityResult
 from validator.segmentation import CATEGORY_TITLES, Requirement, Segmentation
 from validator.segmentation.text import parse_prefix
 
@@ -681,6 +683,298 @@ def _graph_section(
     return "\n\n".join(parts)
 
 
+_SOURCE_TITLES: dict[str, str] = {
+    "CTR-01": "CTR-01 · Несовместимые ограничения одного параметра",
+    "CTR-02": "CTR-02 · Несовместимые значения одноимённого параметра в разных контекстах",
+    "CON-03": "CON-03 · Разные значения одного параметра в одной таблице",
+    "LLM-PAIR": "гипотеза модели о противоречии",
+}
+_UNCHECKED: dict[str, str] = {
+    "CTR-02": "один ли это параметр в одних условиях — если да, это противоречие",
+    "CON-03": "уточнение это или противоречие: как ограничения значения совместимы",
+    "LLM-PAIR": "что речь об одном объекте при одних условиях — это вывод модели (раздел 6)",
+}
+_COMPLETENESS_REVIEW = ("completeness", "missing_condition")
+
+
+def _contradiction_block(number: str, item: Contradiction, confirmed: bool) -> str:
+    source, target = item.evidence[0], item.evidence[-1]
+    lines = [
+        f"**{number}. `{item.requirement_ids[0]}` и `{item.requirement_ids[1]}`** — "
+        f"{_SOURCE_TITLES[item.source]}",
+        "",
+        f"- Цитата `{source.requirement_id}`: {_quote(source.quote)} — {_where(source)}",
+        f"- Цитата `{target.requirement_id}`: {_quote(target.quote)} — {_where(target)}",
+        f"- Почему: {_escape(item.explanation)}",
+    ]
+    if item.numeric is not None:
+        if confirmed and item.numeric.verdict == "disjoint":
+            lines.append(f"- Контрпример: {_escape(item.numeric.detail)}")
+        else:
+            note = (
+                " — числа не пересекаются, но относятся ли они к одному объекту при одних "
+                "условиях, не проверено"
+                if item.numeric.verdict == "disjoint" and not confirmed
+                else ""
+            )
+            lines.append(f"- Сравнение чисел: {_escape(item.numeric.detail)}{note}")
+    elif item.source == "LLM-PAIR":
+        lines.append(
+            "- Сравнение чисел: не выполнялось — в цитатах нет однозначного числового ограничения"
+        )
+    if confirmed:
+        basis = (
+            "машинная проверка ограничений (Evidence Gate проверил обе цитаты)"
+            if item.source == "CTR-01"
+            else f"правило CON-03, замечание `{item.finding_id}` (раздел 4)"
+        )
+        lines += [f"- Основание: {basis}", "- Статус: подтверждено"]
+    else:
+        lines += [
+            f"- Не проверено: {_UNCHECKED[item.source]}",
+            "- Статус: не подтверждено (потенциальное противоречие)",
+        ]
+    return "\n".join(lines)
+
+
+def _rule_block(number: str, finding: Finding) -> str:
+    item = criterion(finding.criterion)
+    lines = [f"**{number}. {finding.rule_id} · {finding.title}**", ""]
+    lines += [
+        f"- Цитата `{e.requirement_id}`: {_quote(e.quote)} — {_where(e)}" for e in finding.evidence
+    ]
+    lines += [
+        f"- Почему: {_escape(finding.explanation)}",
+        f"- Как исправить: {_escape(finding.recommendation)}",
+        f"- Важность: {SEVERITY_TITLES[finding.severity]}",
+        f"- Критерий: {item.reference} — {item.title}",
+        "- Статус: подтверждено",
+    ]
+    return "\n".join(lines)
+
+
+def _ids(ids: Iterable[str]) -> str:
+    return ", ".join(f"`{rid}`" for rid in ids)
+
+
+def _coverage_lines(
+    passport: RunPassport,
+    quality: QualityResult,
+    graph: FactGraph | None,
+    crosscheck: CrossCheckAnalysis | None,
+) -> list[str]:
+    lines = [
+        "- Детерминированно сравниваются только утверждения «параметр — значение» с числовым "
+        f"значением (строки таблиц «параметр | значение» и фрагменты «Параметр: значение»): "
+        f"{quality.statements}."
+    ]
+    reasons: list[str] = []
+    if crosscheck is None:
+        mode = " (режим --rules-only)" if passport.mode == "rules-only" else ""
+        lines.append(f"- Смысловые противоречия моделью не проверялись{mode}.")
+        reasons.append("модель пары не проверяла")
+    elif crosscheck.disabled:
+        lines.append("- Проверка пар моделью отключена (LLM_MAX_PAIR_REQUESTS = 0).")
+        reasons.append("проверка пар моделью отключена")
+    else:
+        lines.append(
+            f"- Модель проверила {crosscheck.requests} из {crosscheck.candidates_total} "
+            "пар-кандидатов (раздел 6)."
+        )
+        if crosscheck.skipped:
+            reasons.append(f"не проверено моделью пар-кандидатов: {len(crosscheck.skipped)}")
+    if graph is not None:
+        selection = graph.candidates
+        if selection.truncated:
+            reasons.append(f"исключено ограничением отбора: {selection.excluded_by_limit}")
+        if selection.outside_pairs > 0:
+            reasons.append(
+                f"пар вне отбора (общих значимых слов меньше {selection.min_shared}): "
+                f"{selection.outside_pairs}"
+            )
+    if reasons:
+        lines.append("- Отсутствие противоречий не утверждается: " + "; ".join(reasons) + ".")
+    else:
+        lines.append(
+            "- Все пары-кандидаты проверены, но это не доказательство отсутствия противоречий: "
+            "правила сравнивают только числовые значения параметров, а модель — только пары "
+            "с общими словами."
+        )
+    return lines
+
+
+def _acceptance_lines(
+    quality: QualityResult, lint: LintResult | None, analysis: LLMAnalysis | None
+) -> list[str]:
+    accepted = set(quality.acceptance)
+    if not quality.acceptance:
+        return [
+            "Критерии приёмки в документе не выделены: нет раздела, заголовок которого "
+            "называет критерии приёмки, — проверить приёмку требований по документу нельзя. "
+            "Это наблюдение по структуре документа: критерии могут быть описаны иначе, и тогда "
+            "агент их не распознал."
+        ]
+    lines = [
+        f"- Критериев приёмки (фрагменты раздела критериев приёмки): {len(quality.acceptance)} — "
+        f"{_ids(quality.acceptance)}."
+    ]
+    if lint is not None:
+        rules = [f for f in lint.findings if accepted & set(f.requirement_ids)]
+        if rules:
+            lines.append(
+                "- Замечания правил к критериям (раздел 4): "
+                + "; ".join(f"`{f.id}` — {_escape(f.title)}" for f in rules)
+                + "."
+            )
+    if analysis is not None:
+        hypotheses = [f for f in analysis.hypotheses if accepted & set(f.requirement_ids)]
+        if hypotheses:
+            lines.append(
+                "- Гипотезы модели к критериям (раздел 5, не подтверждены): "
+                + "; ".join(f"`{f.requirement_ids[0]}` — {_escape(f.title)}" for f in hypotheses)
+                + "."
+            )
+        skipped = [s.requirement_id for s in analysis.skipped if s.requirement_id in accepted]
+        if skipped:
+            lines.append(f"- Модель не проверяла критерии: {_ids(skipped)}.")
+    else:
+        lines.append("- Смысловая проверка критериев моделью не выполнялась.")
+    if quality.acceptance_links:
+        lines.append(
+            f"- Критерии ссылаются на требования: {_ids(quality.acceptance_links)}; без ссылки "
+            f"из критериев: {len(quality.unlinked_requirements)}"
+            + (
+                f" — {_ids(quality.unlinked_requirements)}."
+                if quality.unlinked_requirements
+                else "."
+            )
+        )
+    else:
+        lines.append(
+            "- Связь критериев с требованиями не прослеживается: ни один критерий не ссылается "
+            "на ID требования — какие требования покрыты приёмкой, определить нельзя."
+        )
+    return lines
+
+
+def _completeness_lines(
+    passport: RunPassport,
+    lint: LintResult | None,
+    analysis: LLMAnalysis | None,
+    graph: FactGraph | None,
+) -> list[str]:
+    lines: list[str] = []
+    if lint is not None:
+        rules = [f for f in lint.findings if f.category == "completeness"]
+        lines.append(
+            f"- Замечания правил полноты (раздел 4): {len(rules)}"
+            + (
+                " — " + "; ".join(f"`{f.id}` — {_escape(f.title)}" for f in rules) + "."
+                if rules
+                else "."
+            )
+        )
+    if graph is not None and graph.gaps:
+        lines.append(
+            f"- Ссылки, не сведённые к требованию (раздел 6): {len(graph.gaps)} — "
+            + _ids(dict.fromkeys(gap.requirement_id for gap in graph.gaps))
+            + "."
+        )
+    if analysis is not None:
+        hypotheses = [f for f in analysis.hypotheses if f.review_category in _COMPLETENESS_REVIEW]
+        lines.append(
+            f"- Гипотезы модели о неполноте (раздел 5, не подтверждены): {len(hypotheses)}"
+            + (
+                " — "
+                + "; ".join(f"`{f.requirement_ids[0]}` — {_escape(f.title)}" for f in hypotheses)
+                + "."
+                if hypotheses
+                else "."
+            )
+        )
+        if analysis.skipped:
+            lines.append(
+                f"- Модель не проверяла требований: {len(analysis.skipped)} (раздел 5) — "
+                "их смысловая полнота не оценивалась."
+            )
+        scope = (
+            f"смысловые пропуски — гипотезами модели для {analysis.requirements_sent} требований"
+        )
+    else:
+        mode = " (режим --rules-only)" if passport.mode == "rules-only" else ""
+        lines.append(f"- Смысловая полнота моделью не проверялась{mode}.")
+        scope = "смысловые пропуски не проверялись"
+    lines.append(
+        "- Полнота документа не доказывается: правила проверяют формальные признаки "
+        f"(заглушки, пустые значения, оборванные формулировки, ссылки), {scope}; "
+        "отсутствующие требования агент не придумывает."
+    )
+    return lines
+
+
+def _quality_section(
+    passport: RunPassport,
+    quality: QualityResult,
+    lint: LintResult | None,
+    analysis: LLMAnalysis | None,
+    graph: FactGraph | None,
+    crosscheck: CrossCheckAnalysis | None,
+) -> str:
+    confirmed, potential = quality.confirmed, quality.potential
+    model_items = sum(1 for item in potential if item.source == "LLM-PAIR")
+    parts = [
+        "## 7. Противоречия, критерии приёмки и полнота",
+        "Проверка набора требований целиком. Подтверждённое противоречие — только с машинным "
+        "контрпримером (ограничения одного параметра в одном разделе не пересекаются) или по "
+        "правилу CON-03; потенциальное — когда контекст или тождество объекта не проверены. "
+        "Гипотезы модели остаются потенциальными. Новых запросов к модели этот раздел не "
+        "делает: он сводит результаты разделов 4–6 и добавляет правила CTR-01, CTR-02, ACC-01.",
+        "### 7.1. Противоречия",
+        f"Подтверждено: {len(confirmed)}; потенциальных: {len(potential)}"
+        + (f" (из них гипотез модели: {model_items})" if model_items else "")
+        + ".",
+    ]
+    if confirmed:
+        parts.append(f"#### Подтверждённые противоречия ({len(confirmed)})")
+        parts += [
+            _contradiction_block(f"7.1.{n}", item, True) for n, item in enumerate(confirmed, 1)
+        ]
+    if potential:
+        parts.append(f"#### Потенциальные противоречия ({len(potential)}, не подтверждены)")
+        start = len(confirmed)
+        parts += [
+            _contradiction_block(f"7.1.{start + n}", item, False)
+            for n, item in enumerate(potential, 1)
+        ]
+    if quality.hypotheses_confirmed:
+        parts.append(
+            "Гипотезы модели о противоречии, совпавшие с подтверждёнными (не дублируются): "
+            + _ids(quality.hypotheses_confirmed)
+            + "."
+        )
+    parts += [
+        "#### Полнота проверки противоречий",
+        "\n".join(_coverage_lines(passport, quality, graph, crosscheck)),
+        "### 7.2. Критерии приёмки",
+        "\n".join(_acceptance_lines(quality, lint, analysis)),
+    ]
+    scenario = [f for f in quality.findings if f.rule_id == "ACC-01"]
+    parts += [_rule_block(f"7.2.{n}", finding) for n, finding in enumerate(scenario, 1)]
+    parts += [
+        "### 7.3. Полнота",
+        "\n".join(_completeness_lines(passport, lint, analysis, graph)),
+    ]
+    if quality.rejected:
+        parts += [
+            f"### Отклонено проверкой доказательств ({len(quality.rejected)})",
+            "\n".join(
+                f"- `{item.finding.id}`: {_escape('; '.join(item.reasons))}"
+                for item in quality.rejected
+            ),
+        ]
+    return "\n\n".join(parts)
+
+
 def render_report(
     passport: RunPassport,
     document: Document,
@@ -690,6 +984,7 @@ def render_report(
     *,
     graph: FactGraph | None = None,
     crosscheck: CrossCheckAnalysis | None = None,
+    quality: QualityResult | None = None,
 ) -> str:
     sections = [
         f"# Отчёт о проверке требований: {_cell(passport.document_name)}",
@@ -705,10 +1000,12 @@ def render_report(
         sections.append(llm_section)
     if graph is not None:
         sections.append(_graph_section(passport, graph, crosscheck))
+    if quality is not None:
+        sections.append(_quality_section(passport, quality, lint, llm, graph, crosscheck))
     sections.append(
-        "> Агент на этапе 7: замечания правил и связи графа, доказанные машинной проверкой, "
-        "подтверждены Evidence Gate; LLM-обзор требований и проверка пар дают гипотезы с "
-        "проверенными цитатами, но непроверенным смыслом — смысловая проверка появится на "
-        "следующих этапах."
+        "> Агент на этапе 8: замечания правил, связи графа и противоречия с машинным "
+        "контрпримером подтверждены Evidence Gate; гипотезы модели (обзор требований, "
+        "проверка пар) — с проверенными цитатами, но непроверенным смыслом; сводка, итог и "
+        "смысловая проверка гипотез появятся на следующих этапах."
     )
     return "\n\n".join(sections) + "\n"

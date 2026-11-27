@@ -16,6 +16,7 @@ from validator.llm.crosscheck import crosscheck_pairs
 from validator.llm.fake import FakeProvider
 from validator.model import Block, Document, Location
 from validator.passport import RunPassport
+from validator.quality import analyze_quality
 from validator.report import render_report
 from validator.segmentation import Segmentation, segment_document
 
@@ -258,8 +259,8 @@ def test_report_footer_names_current_stage(tmp_path: Path) -> None:
 
     text = render_report(_passport(NOON), document, segmentation, lint)
 
-    assert "> Агент на этапе 7:" in text
-    assert text.rstrip().endswith("смысловая проверка появится на следующих этапах.")
+    assert "> Агент на этапе 8:" in text
+    assert text.rstrip().endswith("смысловая проверка гипотез появятся на следующих этапах.")
 
 
 # --- раздел 5: гипотезы LLM ---------------------------------------------------------------
@@ -446,7 +447,7 @@ def _section6(
         crosscheck=crosscheck,
     )
     start = text.index("## 6. Связи между требованиями (Fact Graph)")
-    return text[start : text.index("> Агент на этапе 7:")]
+    return text[start : text.index("> Агент на этапе 8:")]
 
 
 def test_graph_section_shows_verified_dependency_with_both_quotes(tmp_path: Path) -> None:
@@ -594,3 +595,106 @@ def test_disabled_budget_lists_every_unchecked_pair(tmp_path: Path) -> None:
     assert "- Проверка пар моделью отключена (LLM_MAX_PAIR_REQUESTS = 0)." in section
     assert "- Пары-кандидаты, не проверенные моделью: 6 —" in section
     assert "- Пары вне отбора (общих значимых слов меньше 2): 29" in section
+
+
+# --- раздел 7: противоречия, критерии приёмки, полнота (этап 8) ----------------------------
+
+QUALITY_SPEC = (
+    "# Сервис бронирования книг\n\n## Функциональные требования\n\n"
+    "* Ф-1. Срок хранения брони: не более 3 дней.\n"
+    "* Ф-2. Срок хранения брони — 5 дней.\n"
+    "* Ф-3. Система хранит бронь книги не более 3 дней после подтверждения.\n"
+    "* Ф-4. Система хранит бронь книги 7 дней после подтверждения.\n"
+    "* Ф-5. Срок выдачи: TBD.\n\n"
+    "## Критерии приёмки\n\n"
+    "* Дано: читатель авторизован.\n"
+    "* Когда читатель бронирует книгу.\n"
+)
+PAIR = relation("Ф-3", "не более 3 дней после подтверждения", "Ф-4", "7 дней после подтверждения")
+
+
+def _section7(tmp_path: Path, markdown: str = QUALITY_SPEC, *, rules_only: bool = False) -> str:
+    built = load(tmp_path, markdown)
+    passport = _passport(NOON)
+    quality = analyze_quality(built.document, built.segmentation, built.lint, built.graph)
+    analysis = crosscheck = None
+    if rules_only:
+        passport = replace(passport, provider=None, model=None, mode="rules-only")
+    else:
+        options = LLMOptions(max_retries=0, max_requests=3, max_pair_requests=1)
+        analysis = review_requirements(built.document, built.segmentation, FakeProvider(), options)
+        crosscheck = crosscheck_pairs(
+            built.document,
+            built.segmentation,
+            built.graph,
+            FakeProvider(relations_json(PAIR)),
+            options,
+        )
+        quality = quality.with_hypotheses(crosscheck.hypotheses)
+    text = render_report(
+        passport,
+        built.document,
+        built.segmentation,
+        built.lint,
+        analysis,
+        graph=built.graph,
+        crosscheck=crosscheck,
+        quality=quality,
+    )
+    return text[text.index("## 7.") : text.index("> Агент на этапе 8:")]
+
+
+def test_confirmed_contradiction_shows_counterexample(tmp_path: Path) -> None:
+    section = _section7(tmp_path)
+
+    confirmed = section[section.index("#### Подтверждённые") : section.index("#### Потенциальные")]
+    assert "**7.1.1. `Ф-1` и `Ф-2`** — CTR-01" in confirmed
+    assert "- Контрпример: «не более 3 дней» и «5 дней» не пересекаются" in confirmed
+    assert "- Статус: подтверждено" in confirmed
+
+
+def test_model_contradiction_stays_potential_without_counterexample_wording(
+    tmp_path: Path,
+) -> None:
+    section = _section7(tmp_path)
+
+    potential = section[section.index("#### Потенциальные") : section.index("#### Полнота")]
+    assert "`Ф-3` и `Ф-4`** — гипотеза модели о противоречии" in potential
+    assert "- Сравнение чисел: «не более 3 дней» и «7 дней» не пересекаются" in potential
+    assert "не проверено" in potential
+    assert "Контрпример" not in potential
+    assert "- Статус: не подтверждено (потенциальное противоречие)" in potential
+
+
+def test_absence_of_contradictions_is_never_claimed(tmp_path: Path) -> None:
+    section = _section7(tmp_path)
+
+    assert "- Отсутствие противоречий не утверждается:" in section
+    assert "противоречий нет" not in section.casefold()
+
+
+def test_acceptance_and_completeness_are_reported(tmp_path: Path) -> None:
+    section = _section7(tmp_path)
+
+    assert "**7.2.1. ACC-01 · Сценарий приёмки без ожидаемого результата**" in section
+    assert "- Связь критериев с требованиями не прослеживается" in section
+    assert "- Замечания правил полноты (раздел 4): 1 — `CMP-01:" in section
+    assert "- Полнота документа не доказывается" in section
+
+
+def test_rules_only_quality_section_names_what_was_not_checked(tmp_path: Path) -> None:
+    section = _section7(tmp_path, rules_only=True)
+
+    assert "- Смысловые противоречия моделью не проверялись (режим --rules-only)." in section
+    assert "- Смысловая полнота моделью не проверялась (режим --rules-only)." in section
+    assert "- Смысловая проверка критериев моделью не выполнялась." in section
+    assert "гипотеза модели" not in section
+
+
+def test_document_without_acceptance_criteria_is_an_explicit_observation(tmp_path: Path) -> None:
+    section = _section7(
+        tmp_path, "# Сервис\n\n## Функциональные требования\n\n* Ф-1. Читатель бронирует книгу.\n"
+    )
+
+    assert "Критерии приёмки в документе не выделены" in section
+    assert "агент их не распознал" in section
