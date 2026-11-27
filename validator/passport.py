@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from validator.config import Settings
+from validator.model import Document
 from validator.version import agent_version
 
 
@@ -25,13 +24,13 @@ class RunPassport:
 
 
 def build_passport(
-    document: Path, text: str, settings: Settings, *, llm_used: bool, started_at: datetime
+    document: Document, settings: Settings, *, llm_used: bool, started_at: datetime
 ) -> RunPassport:
     return RunPassport(
-        document_name=document.name,
-        document_path=str(document.resolve()),
-        document_sha256=hashlib.sha256(document.read_bytes()).hexdigest(),
-        document_chars=len(text),
+        document_name=document.source.name,
+        document_path=str(document.source.resolve()),
+        document_sha256=document.sha256,
+        document_chars=document.char_count,
         started_at=started_at,
         agent_version=agent_version(),
         provider=settings.provider,

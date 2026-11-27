@@ -10,6 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "python-dotenv>=1.0,<2",
+    "markdown-it-py>=3,<5",
+    # PyMuPDF 2.x тянет onnxruntime/numpy (~250 МБ) ради ИИ-разметки, которая не нужна
+    "pymupdf>=1.26,<2",
+    "python-docx>=1.1,<2",
 ]
 
 [project.optional-dependencies]
@@ -39,3 +43,6 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 python_version = "3.11"
 strict = true
 files = ["validator"]
+# В PyMuPDF часть функций без аннотаций типов: исключение касается только вызовов его функций,
+# строгость для кода проекта сохраняется.
+untyped_calls_exclude = ["pymupdf"]

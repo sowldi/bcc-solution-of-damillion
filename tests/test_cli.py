@@ -5,6 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.builders import (
+    SAMPLE,
+    Writer,
+    write_docx,
+    write_markdown,
+    write_sample_pdf,
+    write_text,
+)
 from tests.conftest import RunCli
 from validator.cli import main
 from validator.errors import EXIT_CONFIG_ERROR, EXIT_INPUT_ERROR, EXIT_OK
@@ -111,3 +119,47 @@ def test_utf8_bom_document_is_read(tmp_path: Path) -> None:
 
     assert main([str(src), str(report)]) == EXIT_OK
     assert "bom.md" in report.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("writer", "name", "title"),
+    [
+        (write_markdown, "spec.md", "Markdown"),
+        (write_text, "spec.txt", "Текст (TXT)"),
+        (write_docx, "spec.docx", "Word (DOCX)"),
+        (write_sample_pdf, "spec.pdf", "PDF"),
+    ],
+    ids=["md", "txt", "docx", "pdf"],
+)
+def test_command_reads_every_supported_format(
+    run_cli: RunCli, tmp_path: Path, writer: Writer, name: str, title: str
+) -> None:
+    source = writer(tmp_path / name, SAMPLE)
+    report = tmp_path / "out" / f"{name}.report.md"
+
+    result = run_cli(str(source), str(report))
+
+    assert result.returncode == EXIT_OK, result.stderr
+    text = report.read_text(encoding="utf-8")
+    assert "## 2. Извлечение текста" in text
+    assert f"| Формат | {title} |" in text
+
+
+def test_reading_warnings_are_printed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    src = tmp_path / "legacy.txt"
+    src.write_bytes("Текст в старой кодировке.\n".encode("cp1251"))
+
+    assert main([str(src), str(tmp_path / "report.md")]) == EXIT_OK
+
+    err = capsys.readouterr().err
+    assert "Предупреждение" in err
+    assert "Windows-1251" in err
+
+
+def test_corrupted_pdf_is_input_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    src = tmp_path / "broken.pdf"
+    src.write_bytes(b"%PDF-1.7\n" + bytes(range(256)) * 4)
+
+    assert main([str(src), str(tmp_path / "report.md")]) == EXIT_INPUT_ERROR
+    assert "PDF повреждён" in capsys.readouterr().err
+    assert not (tmp_path / "report.md").exists()

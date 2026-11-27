@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
+from validator.model import Block, Document, Location
 from validator.passport import RunPassport
 from validator.report import render_report
 
@@ -23,6 +25,28 @@ def _passport(started_at: datetime) -> RunPassport:
     )
 
 
+def _document(**changes: object) -> Document:
+    document = Document(
+        source=Path("spec.pdf"),
+        format="pdf",
+        sha256="0" * 64,
+        page_count=3,
+        blocks=(
+            Block("heading", "Раздел", Location(page=1), level=1),
+            Block("paragraph", "Абзац", Location(page=1)),
+            Block("list_item", "Пункт", Location(page=1)),
+            Block("table_header", "A | B", Location(page=2, table=1, row=1), cells=("A", "B")),
+            Block("table_row", "1 | 2", Location(page=2, table=1, row=2), cells=("1", "2")),
+            Block("table_row", "3 | 4", Location(page=2, table=1, row=3), cells=("3", "4")),
+            Block("code", "{}", Location(page=3)),
+        ),
+    )
+    return replace(document, **changes)  # type: ignore[arg-type]
+
+
+NOON = datetime(2026, 1, 1, 12, tzinfo=UTC)
+
+
 @pytest.mark.parametrize(
     ("offset", "expected"),
     [
@@ -35,15 +59,46 @@ def test_run_time_uses_explicit_utc_offset(offset: timedelta, expected: str) -> 
     """Время прогона однозначно на любой ОС: смещение от UTC, а не локализованное имя пояса."""
     started = datetime(2026, 11, 27, 10, 20, 29, tzinfo=timezone(offset, "Кызылорда (зима)"))
 
-    text = render_report(_passport(started))
+    text = render_report(_passport(started), _document())
 
     assert f"| Дата и время прогона | {expected} |" in text
     assert "Кызылорда" not in text
 
 
 def test_table_cells_are_escaped() -> None:
-    passport = replace(_passport(datetime(2026, 1, 1, tzinfo=UTC)), document_name="a|b\nc.md")
+    passport = replace(_passport(NOON), document_name="a|b\nc.md")
 
-    text = render_report(passport)
+    text = render_report(passport, _document())
 
     assert "a\\|b c.md" in text
+
+
+def test_extraction_summary() -> None:
+    text = render_report(_passport(NOON), _document())
+
+    assert "## 2. Извлечение текста" in text
+    for row in [
+        "| Формат | PDF |",
+        "| Страниц | 3 |",
+        "| Заголовков | 1 |",
+        "| Абзацев | 1 |",
+        "| Пунктов списков | 1 |",
+        "| Таблиц | 1 |",
+        "| Строк таблиц (без шапки) | 2 |",
+        "| Фрагментов кода | 1 |",
+        "| Всего блоков | 7 |",
+    ]:
+        assert row in text
+    assert "Кодировка" not in text  # для PDF кодировка не применяется
+
+
+def test_encoding_and_warnings_are_shown() -> None:
+    document = _document(
+        format="text", page_count=None, encoding="cp1251", warnings=("Кодировка угадана.",)
+    )
+
+    text = render_report(_passport(NOON), document)
+
+    assert "| Кодировка | cp1251 |" in text
+    assert "Страниц" not in text
+    assert "- Кодировка угадана." in text
