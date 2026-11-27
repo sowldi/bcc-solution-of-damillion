@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import Literal
 
-from validator.findings import EvidenceKind, RuleCategory, Severity
+from validator.findings import AbsenceClaim, EvidenceKind, RuleCategory, Severity
 from validator.lint.definitions import Definitions
 from validator.model import Block, BlockKind, Document
 from validator.segmentation import Requirement, Segmentation
@@ -32,10 +32,15 @@ class Span:
 
 @dataclass(frozen=True)
 class Hit:
-    """Срабатывание правила: участники (первый — основной) и конкретное объяснение."""
+    """Срабатывание правила: участники (первый — основной) и конкретное объяснение.
+
+    absence — ограниченная область, где правило утверждает отсутствие (для правил с видом
+    доказательства «absence»); Evidence Gate перепроверяет её по документу.
+    """
 
     spans: tuple[Span, ...]
     explanation: str
+    absence: AbsenceClaim | None = None
 
 
 @dataclass(frozen=True)

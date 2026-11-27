@@ -9,8 +9,14 @@ from typing import cast
 import pytest
 
 from tests.seg_helpers import unit
-from validator.evidence import absence_evidence, build_evidence, check_finding, gate_findings
-from validator.findings import Evidence, EvidenceKind, Finding, Severity
+from validator.evidence import (
+    TrustedRule,
+    absence_evidence,
+    build_evidence,
+    check_finding,
+    gate_findings,
+)
+from validator.findings import AbsenceClaim, Evidence, EvidenceKind, Finding, Severity
 from validator.ingest import load_document
 from validator.model import Document, Location
 from validator.segmentation import Requirement, Segmentation, segment_document
@@ -31,6 +37,10 @@ SPEC = """# Сервис бронирования
 """
 
 Pair = tuple[Segmentation, Document]
+# Каталог для Gate: замечание правила подтверждается, только если правило известно.
+RULES = (
+    TrustedRule("TEST-01", "1", "minor", "ambiguity", "UNA", "quote", "Проверочное замечание"),
+)
 
 
 @pytest.fixture
@@ -58,6 +68,7 @@ def _finding(
         requirement_ids=tuple(dict.fromkeys(f.id for f, _, _ in spans)),
         evidence=evidence,
         evidence_kind=kind,
+        document_sha256=document.sha256,
     )
 
 
@@ -80,7 +91,7 @@ def test_valid_finding_passes(pair: Pair) -> None:
     finding = _finding(document, _reader(seg))
 
     assert check_finding(finding, seg, document) == ()
-    result = gate_findings([finding], seg, document)
+    result = gate_findings([finding], seg, document, rules=RULES)
     assert result.accepted == (replace(finding, evidence_status="verified"),)
     assert result.rejected == ()
 
@@ -117,7 +128,7 @@ def test_tampered_quote_is_rejected(pair: Pair) -> None:
     forged = replace(finding, evidence=(replace(finding.evidence[0], quote="Библиотекарь"),))
 
     assert "цитата" in _reasons(forged, pair)
-    result = gate_findings([forged], seg, document)
+    result = gate_findings([forged], seg, document, rules=RULES)
     assert result.accepted == ()
     [rejected] = result.rejected
     assert rejected.finding.evidence_status == "rejected"
@@ -270,6 +281,7 @@ def test_absence_evidence_on_empty_row_passes(pair: Pair) -> None:
     header_evidence = build_evidence(header, 0, len(header.text), document)
     finding = replace(
         _finding(document, (header, 0, len(header.text)), kind="absence"),
+        absence=AbsenceClaim("table", str(header.location.table), "data"),
         requirement_ids=(header.id, row.id),
         evidence=(header_evidence, absence_evidence(row)),
     )
@@ -288,7 +300,12 @@ def test_empty_quote_is_allowed_only_for_absence(pair: Pair) -> None:
     )
 
     assert "пуст" in _reasons(finding, pair)
-    assert check_finding(replace(finding, evidence_kind="absence"), seg, document) == ()
+    bounded = replace(
+        finding,
+        evidence_kind="absence",
+        absence=AbsenceClaim("table", str(row.location.table), "data"),
+    )
+    assert check_finding(bounded, seg, document) == ()
 
 
 def test_absence_on_non_empty_fragment_is_rejected(pair: Pair) -> None:
@@ -335,7 +352,7 @@ def test_gate_keeps_order_and_marks_status(pair: Pair) -> None:
     bad = replace(good, id="TEST-01:bad", evidence=(replace(good.evidence[0], quote="x"),))
     second = replace(good, id="TEST-01:second")
 
-    result = gate_findings([good, bad, second], seg, document)
+    result = gate_findings([good, bad, second], seg, document, rules=RULES)
 
     assert [f.id for f in result.accepted] == [good.id, second.id]
     assert all(f.evidence_status == "verified" for f in result.accepted)

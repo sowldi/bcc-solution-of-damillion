@@ -148,3 +148,25 @@ def test_result_refuses_unverified_findings(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="verified"):
         replace(linted.result, findings=(unverified,))
+
+
+def test_every_finding_is_bound_and_absence_is_bounded(tmp_path: Path) -> None:
+    from tests.test_lint_catalog import RICH
+
+    linted = lint_markdown(tmp_path, RICH)
+
+    assert linted.result.rejected == ()
+    for finding in linted.result.findings:
+        assert finding.document_sha256 == linted.document.sha256
+        if finding.evidence_kind == "absence":
+            assert finding.absence is not None, finding.id
+        else:
+            assert finding.absence is None, finding.id
+
+
+def test_result_refuses_findings_of_another_document(tmp_path: Path) -> None:
+    linted = lint_markdown(tmp_path, AMBIGUOUS)
+    foreign = replace(linted.result.findings[0], document_sha256="f" * 64)
+
+    with pytest.raises(ValueError, match="документ"):
+        replace(linted.result, findings=(foreign,))

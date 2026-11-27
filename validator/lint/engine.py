@@ -48,6 +48,11 @@ class LintResult:
                     f"Замечание {finding.id} не прошло проверку доказательств "
                     f"(статус {finding.evidence_status}, нужен verified)."
                 )
+            if finding.origin != "rule" or finding.document_sha256 != self.document_sha256:
+                raise ValueError(
+                    f"Замечание {finding.id} не является замечанием правила для этого документа "
+                    "(origin и SHA-256 документа должны совпадать)."
+                )
         for rejected in self.rejected:
             if rejected.finding.evidence_status != "rejected":
                 raise ValueError(f"Отклонённое замечание {rejected.finding.id} без статуса.")
@@ -136,7 +141,8 @@ def run_lint(
 ) -> LintResult:
     context = build_context(document, segmentation)
     drafts = [finding for rule in rules for finding in run_rule(rule, context)]
-    gate = gate_findings(drafts, segmentation, document)
+    # Gate сверяет каждое замечание с каталогом именно тех правил, что были запущены.
+    gate = gate_findings(drafts, segmentation, document, rules=rules)
     phrase_rules = {rule.rule_id for rule in rules if rule.granularity == "phrase"}
     findings, suppressed = _deduplicate(gate.accepted, phrase_rules)
     findings.sort(key=lambda finding: _document_order(finding, context))
@@ -165,6 +171,8 @@ def _finding(rule: Rule, hit: Hit, document: Document) -> Finding:
         requirement_ids=tuple(dict.fromkeys(span.fragment.id for span in hit.spans)),
         evidence=tuple(_evidence(span, document) for span in hit.spans),
         evidence_kind=rule.evidence_kind,
+        document_sha256=document.sha256,
+        absence=hit.absence,
     )
 
 

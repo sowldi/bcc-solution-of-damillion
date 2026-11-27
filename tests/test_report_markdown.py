@@ -255,8 +255,8 @@ def test_report_footer_names_current_stage(tmp_path: Path) -> None:
 
     text = render_report(_passport(NOON), document, segmentation, lint)
 
-    assert "> Агент на этапе 4:" in text
-    assert text.rstrip().endswith("проверка доказательств для гипотез LLM — этап 5.")
+    assert "> Агент на этапе 5:" in text
+    assert text.rstrip().endswith("смысловая проверка появится на следующих этапах.")
 
 
 # --- раздел 5: гипотезы LLM ---------------------------------------------------------------
@@ -311,3 +311,17 @@ def test_rules_only_report_says_llm_was_not_used(tmp_path: Path) -> None:
 
     assert "## 5. Анализ LLM" in text
     assert "LLM не использовался (режим --rules-only)." in text
+
+
+def test_absence_findings_show_their_bounded_scope(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n* Ф-1. Читатель бронирует книгу.\n\n"
+        "## Согласование\n\n| Роль | Дата |\n| --- | --- |\n| | |\n",
+    )
+
+    text = render_report(_passport(NOON), document, segmentation, lint)
+
+    assert "CMP-05" in text
+    assert "- Отсутствие проверено в области: таблица 1" in text
+    assert "извлечённого из документа" in text

@@ -15,6 +15,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 
+from validator.findings import AbsenceClaim
 from validator.ingest.common import one_line
 from validator.lint.base import Hit, LintContext, Span
 from validator.segmentation import Requirement
@@ -280,6 +281,7 @@ def tst05(context: LintContext) -> Iterator[Hit]:
                 (Span(fragment, match.start(), match.end()),),
                 f"Требование к атрибуту качества «{one_line(match.group(0))}» не содержит "
                 "числового критерия: порога, единицы измерения, условий замера.",
+                absence=AbsenceClaim("requirement", fragment.id, "number"),
             )
 
 

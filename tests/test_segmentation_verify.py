@@ -188,3 +188,29 @@ def test_internal_inconsistency_is_not_silently_accepted(
 
     with pytest.raises(SegmentationError):
         segment_document(document)
+
+
+# --- M4: нормализованный текст тоже доказуем --------------------------------------------------
+
+
+@pytest.mark.parametrize("fragment_id", ["Ф-1", "Ф-1/2"])
+def test_verification_detects_tampered_normalized_text(
+    pair: tuple[Segmentation, Document], fragment_id: str
+) -> None:
+    seg, document = pair
+
+    problems = verify_segmentation(
+        _replace_fragment(seg, fragment_id, normalized="Читатель задаёт любой срок брони."),
+        document,
+    )
+
+    assert any("normalized" in p and fragment_id in p for p in problems)
+
+
+def test_normalized_text_of_real_segmentation_is_consistent(
+    pair: tuple[Segmentation, Document],
+) -> None:
+    seg, document = pair
+
+    assert verify_segmentation(seg, document) == ()
+    assert seg.by_id("Ф-1").normalized.startswith("Читатель задаёт срок брони.")

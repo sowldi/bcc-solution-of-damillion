@@ -112,7 +112,7 @@ def test_each_rule_runs_on_its_own(tmp_path: Path) -> None:
     for rule in CATALOG:
         found = run_rule(rule, context)
         assert all(finding.rule_id == rule.rule_id for finding in found), rule.rule_id
-        gate = gate_findings(found, linted.segmentation, linted.document)
+        gate = gate_findings(found, linted.segmentation, linted.document, rules=CATALOG)
         assert gate.rejected == (), (rule.rule_id, gate.rejected)
         union |= {finding.id for finding in gate.accepted}
 

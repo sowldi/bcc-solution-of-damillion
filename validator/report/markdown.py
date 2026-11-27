@@ -16,6 +16,7 @@ from validator.findings import (
     RULE_CATEGORY_TITLES,
     SEVERITIES,
     SEVERITY_TITLES,
+    AbsenceClaim,
     Evidence,
     Finding,
     Severity,
@@ -221,6 +222,8 @@ def _finding_block(number: int, finding: Finding) -> str:
         lines += [
             f"  - `{e.requirement_id}`: {_quote(e.quote)} — {_where(e)}" for e in finding.evidence
         ]
+    if finding.absence is not None:
+        lines.append(f"- Отсутствие проверено в области: {_absence_scope(finding.absence)}")
     lines += [
         f"- Почему: {_escape(finding.explanation)}",
         f"- Как исправить: {_escape(finding.recommendation)}",
@@ -230,6 +233,17 @@ def _finding_block(number: int, finding: Finding) -> str:
     return "\n".join(lines)
 
 
+def _absence_scope(claim: AbsenceClaim) -> str:
+    target = _escape(claim.target)
+    return {
+        "table": f"таблица {target}",
+        "section": f"раздел «{target}»",
+        "requirement": f"требование `{claim.target}`",
+        "id_registry": f"идентификаторы требований документа (нет «{target}»)",
+        "heading_registry": f"нумерация разделов документа (нет раздела {target})",
+    }[claim.scope]
+
+
 def _lint_section(lint: LintResult, segmentation: Segmentation | None) -> str:
     atomic = len(segmentation.atomic_requirements) if segmentation else 0
     parts = [
@@ -237,8 +251,10 @@ def _lint_section(lint: LintResult, segmentation: Segmentation | None) -> str:
         f"Каталог правил {lint.catalog_version}, правил: {len(lint.rules)} — проверяемость, "
         "однозначность, полнота, согласованность, трассируемость. Правила формулировок "
         f"применены к атомарным требованиям ({atomic}), структурные — ко всему документу. "
-        "Каждое замечание прошло проверку доказательств: цитата — точный фрагмент документа, "
-        "место вычислено по источнику.",
+        "Каждое замечание прошло Evidence Gate: оно привязано к этой версии документа "
+        f"(SHA-256 {lint.document_sha256[:12]}…), цитата — точный фрагмент текста, "
+        "извлечённого из документа (разметка формата в него не входит), место вычислено по "
+        "исходному файлу, утверждение об отсутствии перепроверено в указанной области.",
     ]
     if segmentation is not None and segmentation.ambiguous:
         parts.append(
@@ -316,8 +332,9 @@ def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | N
         "## 5. Анализ LLM (гипотезы, не подтверждены)",
         coverage,
         "> Гипотезы LLM не являются замечаниями: модель только предполагает дефект. Ниже — "
-        "гипотезы, цитата которых дословно найдена в тексте требования; сам дефект не "
-        "проверен. Проверка доказательств для гипотез LLM появится на этапе 5.",
+        "гипотезы, прошедшие Evidence Gate: цитата точно и однозначно найдена в тексте "
+        "названного требования этой версии документа. Это доказывает происхождение цитаты, "
+        "но не смысл замечания — статус остаётся «не подтверждено» до смысловой проверки.",
     ]
     if not analysis.hypotheses:
         parts.append("Модель не предложила гипотез.")
@@ -357,7 +374,7 @@ def render_report(
     if llm_section is not None:
         sections.append(llm_section)
     sections.append(
-        "> Агент на этапе 4: детерминированные правила с проверкой доказательств и гипотезы LLM "
-        "без подтверждения; проверка доказательств для гипотез LLM — этап 5."
+        "> Агент на этапе 5: замечания правил подтверждены Evidence Gate; гипотезы LLM прошли "
+        "проверку цитат, но не смысла — смысловая проверка появится на следующих этапах."
     )
     return "\n\n".join(sections) + "\n"

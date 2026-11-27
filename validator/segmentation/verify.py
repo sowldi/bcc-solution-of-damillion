@@ -13,9 +13,9 @@ from validator.segmentation.model import Requirement, Segmentation, SourceRef
 # source_location живёт в sources.py; импорт здесь сохраняет прежний путь
 # validator.segmentation.verify.source_location для обратной совместимости.
 from validator.segmentation.sources import source_location
-from validator.segmentation.text import parse_prefix
+from validator.segmentation.text import normalize_text, parse_prefix
 
-__all__ = ["source_location", "verify_segmentation"]
+__all__ = ["body_start", "source_location", "verify_segmentation"]
 
 
 def verify_segmentation(segmentation: Segmentation, document: Document) -> tuple[str, ...]:
@@ -25,7 +25,10 @@ def verify_segmentation(segmentation: Segmentation, document: Document) -> tuple
         problems.append("Сегментация построена для другого документа: SHA-256 не совпадает.")
     by_id = {fragment.id: fragment for fragment in segmentation.fragments}
     for fragment in segmentation.fragments:
-        problems += _check_quote(fragment, document)
+        quote_problems = _check_quote(fragment, document)
+        problems += quote_problems
+        if not quote_problems:
+            problems += _check_normalized(fragment, document)
         problems += _check_links(fragment, by_id)
     problems += _check_coverage(segmentation, document)
     return tuple(problems)
@@ -54,6 +57,26 @@ def _check_quote(fragment: Requirement, document: Document) -> list[str]:
     if "\n".join(slices) != fragment.text:
         problems.append(f"{fragment.id}: текст не совпадает с цитатой из источника.")
     return problems
+
+
+def body_start(fragment: Requirement, document: Document) -> int:
+    """Начало содержательного текста фрагмента — так же, как его считает сегментатор:
+    без ID документа или номера пункта в начале абзаца и пункта списка. У строки таблицы,
+    заголовка и утверждения «X/k» префикса нет."""
+    if fragment.is_statement or not fragment.sources:
+        return 0
+    block = document.blocks[fragment.sources[0].block]
+    if block.kind in ("table_row", "heading"):
+        return 0
+    return parse_prefix(block.text, block.kind).body_start
+
+
+def _check_normalized(fragment: Requirement, document: Document) -> list[str]:
+    """M4: normalized — производное от точного текста, а не самостоятельные данные."""
+    expected = normalize_text(fragment.text[body_start(fragment, document) :])
+    if fragment.normalized != expected:
+        return [f"{fragment.id}: normalized не соответствует тексту фрагмента."]
+    return []
 
 
 def _check_links(fragment: Requirement, by_id: dict[str, Requirement]) -> list[str]:

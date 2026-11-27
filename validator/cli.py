@@ -21,6 +21,7 @@ from validator.errors import (
     ProviderError,
     ValidatorError,
 )
+from validator.evidence import ensure_source_unchanged
 from validator.ingest import SUPPORTED_SUFFIXES, load_document
 from validator.lint import run_lint
 from validator.model import Document
@@ -89,6 +90,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if analysis is not None:  # в паспорте — провайдер, который действительно отвечал
             passport = replace(passport, provider=analysis.provider, model=analysis.model)
         report = render_report(passport, document, segmentation, lint, analysis)
+        # Доказательства привязаны к прочитанной версии файла: если файл изменился во время
+        # проверки, отчёт был бы о другом документе — он не записывается.
+        ensure_source_unchanged(document)
         write_text_atomic(args.output, report)
     except ValidatorError as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)

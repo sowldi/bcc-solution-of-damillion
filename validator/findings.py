@@ -22,6 +22,20 @@ RuleCategory = Literal["testability", "ambiguity", "completeness", "consistency"
 EvidenceKind = Literal["quote", "absence", "comparison"]
 EvidenceStatus = Literal["unverified", "verified", "rejected"]
 Origin = Literal["rule", "llm"]
+# Область, в которой утверждается отсутствие, и что именно отсутствует.
+AbsenceScope = Literal["table", "section", "requirement", "id_registry", "heading_registry"]
+ABSENCE_SCOPES: tuple[AbsenceScope, ...] = get_args(AbsenceScope)
+ABSENCE_CLAIMS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("table", "data"),  # в таблице нет заполненных строк данных
+        ("section", "text"),  # в разделе нет текста (кроме заголовков)
+        ("requirement", "number"),  # в требовании нет числа
+        ("requirement", "document_id"),  # у требования нет ID документа
+        ("requirement", "value"),  # значение не заполнено (пусто или прочерк)
+        ("id_registry", "declaration"),  # ID нигде в документе не объявлен
+        ("heading_registry", "heading"),  # раздела с таким номером нет
+    }
+)
 
 SEVERITIES: tuple[Severity, ...] = get_args(Severity)
 RULE_CATEGORIES: tuple[RuleCategory, ...] = get_args(RuleCategory)
@@ -91,6 +105,34 @@ class Evidence:
 
 
 @dataclass(frozen=True)
+class AbsenceClaim:
+    """Утверждение об отсутствии в ограниченной, проверяемой области документа.
+
+    scope/target: таблица (номер), раздел (путь заголовков через « › »), требование (ID
+    фрагмента), реестр ID документа (отсутствующий ID), нумерация разделов (номер раздела).
+    missing — что именно отсутствует (допустимые сочетания — ABSENCE_CLAIMS). Evidence Gate
+    перепроверяет утверждение по документу; «этого нет в документе» без области не принимается.
+    """
+
+    scope: AbsenceScope
+    target: str
+    missing: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"scope": self.scope, "target": self.target, "missing": self.missing}
+
+    @classmethod
+    def from_dict(cls, data: Any) -> AbsenceClaim:
+        if not isinstance(data, dict):
+            raise ValueError("absence: ожидается объект")
+        return cls(
+            scope=cast(AbsenceScope, _choice(data, "scope", ABSENCE_SCOPES)),
+            target=_str(data, "target"),
+            missing=_str(data, "missing"),
+        )
+
+
+@dataclass(frozen=True)
 class Finding:
     """Замечание к документу.
 
@@ -98,6 +140,9 @@ class Finding:
     части соединены «+». requirement_ids — ID фрагментов сегментации, к которым относится
     замечание (требование, а для структурных правил — также заглушка, заголовок, строка
     таблицы); у каждого есть своё доказательство в evidence.
+    document_sha256 — документ, по которому замечание построено: для другого файла или
+    другой версии документа замечание не принимается. absence — область отсутствия
+    (обязательна для evidence_kind="absence").
     """
 
     id: str
@@ -114,10 +159,13 @@ class Finding:
     evidence_kind: EvidenceKind
     evidence_status: EvidenceStatus = "unverified"
     origin: Origin = "rule"
+    document_sha256: str = ""  # пусто — замечание не привязано к документу и не пройдёт Gate
+    absence: AbsenceClaim | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "document_sha256": self.document_sha256,
             "rule_id": self.rule_id,
             "rule_version": self.rule_version,
             "origin": self.origin,
@@ -130,6 +178,7 @@ class Finding:
             "requirement_ids": list(self.requirement_ids),
             "evidence_kind": self.evidence_kind,
             "evidence_status": self.evidence_status,
+            "absence": self.absence.to_dict() if self.absence else None,
             "evidence": [item.to_dict() for item in self.evidence],
         }
 
@@ -154,6 +203,10 @@ class Finding:
                 EvidenceStatus, _choice(data, "evidence_status", EVIDENCE_STATUSES)
             ),
             origin=cast(Origin, _choice(data, "origin", ORIGINS)),
+            document_sha256=_str(data, "document_sha256"),
+            absence=AbsenceClaim.from_dict(data["absence"])
+            if data.get("absence") is not None
+            else None,
         )
 
 

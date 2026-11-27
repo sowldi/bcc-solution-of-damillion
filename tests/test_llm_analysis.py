@@ -165,6 +165,64 @@ def test_analysis_json_round_trip(tmp_path: Path) -> None:
     assert LLMAnalysis.from_json(analysis.to_json()) == analysis
 
 
+def test_correct_quote_attached_to_wrong_requirement_is_rejected(tmp_path: Path) -> None:
+    """Цитата существует (в Ф-1), но модель приписала её Ф-2 — доказательства для Ф-2 нет."""
+    reply = findings_json(hypothesis("Ф-2", "в течение рабочего дня"))
+
+    analysis, *_ = _analyze(tmp_path, reply)
+
+    assert analysis.hypotheses == ()
+    assert "цитата не найдена" in " ".join(analysis.rejected[0].reasons)
+
+
+def test_ambiguous_quote_is_rejected(tmp_path: Path) -> None:
+    markdown = HEAD + "* Ф-1. Читатель бронирует книгу, затем читатель продлевает книгу.\n"
+
+    analysis, *_ = _analyze(tmp_path, findings_json(hypothesis("Ф-1", "книгу")), markdown=markdown)
+
+    assert analysis.hypotheses == ()
+    assert "несколько раз" in " ".join(analysis.rejected[0].reasons)
+
+
+def test_quote_cut_mid_word_or_dropping_negation_is_rejected(tmp_path: Path) -> None:
+    markdown = HEAD + "* Ф-1. Читатель не продлевает бронь повторно.\n"
+    reply = findings_json(
+        hypothesis("Ф-1", "продлевает бронь повторно"),  # без «не»
+        hypothesis("Ф-1", "итатель не"),  # обрыв слова
+    )
+
+    analysis, *_ = _analyze(tmp_path, reply, markdown=markdown)
+
+    assert analysis.hypotheses == ()
+    reasons = " ".join(" ".join(r.reasons) for r in analysis.rejected)
+    assert "отрицани" in reasons
+    assert "посреди слова" in reasons
+
+
+def test_model_cannot_choose_origin_or_status(tmp_path: Path) -> None:
+    claims = [
+        hypothesis("Ф-1", "в течение рабочего дня", origin="rule"),
+        hypothesis("Ф-1", "в течение рабочего дня", rule_id="TST-01"),
+        hypothesis("Ф-1", "в течение рабочего дня", status="verified"),
+    ]
+
+    analysis, *_ = _analyze(tmp_path, findings_json(*claims))
+
+    assert analysis.hypotheses == ()
+    assert len(analysis.rejected) == 3
+
+
+def test_hypotheses_are_bound_to_the_analysed_document(tmp_path: Path) -> None:
+    analysis, _, document, _ = _analyze(
+        tmp_path, findings_json(hypothesis("Ф-1", "в течение рабочего дня"))
+    )
+
+    assert analysis.document_sha256 == document.sha256
+    assert all(f.document_sha256 == document.sha256 for f in analysis.hypotheses)
+    with pytest.raises(ValueError, match="документ"):
+        replace(analysis, document_sha256="f" * 64)
+
+
 def test_request_uses_configured_limits(tmp_path: Path) -> None:
     options = LLMOptions(max_retries=0, max_output_tokens=777, temperature=0.2)
 

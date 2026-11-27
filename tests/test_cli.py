@@ -430,3 +430,23 @@ def test_unknown_model_is_configuration_error(run_cli: RunCli, tmp_path: Path) -
 
     assert result.returncode == EXIT_CONFIG_ERROR
     assert "OLLAMA_MODEL" in result.stderr
+
+
+def test_document_changed_during_run_is_not_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import validator.cli as cli
+
+    spec = _spec(tmp_path)
+    real_run_lint = cli.run_lint
+
+    def edit_then_lint(*args: object, **kwargs: object) -> object:
+        spec.write_text(LINT_SPEC + "* Ф-3. Добавлено во время проверки.\n", encoding="utf-8")
+        return real_run_lint(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli, "run_lint", edit_then_lint)
+    report = tmp_path / "report.md"
+
+    assert main([str(spec), str(report), "--rules-only"]) == EXIT_INPUT_ERROR
+    assert "изменён" in capsys.readouterr().err
+    assert not report.exists()

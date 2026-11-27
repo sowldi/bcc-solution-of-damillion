@@ -5,9 +5,10 @@
    и видна в отчёте).
 2. Ответ проверяется строгой схемой (validator.llm.schema).
 3. Гипотеза становится замечанием Finding(origin="llm") только если её цитата дословно
-   найдена в тексте требования, которое было отправлено модели, и проходит базовую проверку
-   доказательств (check_finding). Статус остаётся «unverified»: правильный JSON и найденная
-   цитата не доказывают сам дефект. Подтверждение гипотез — задача Evidence Gate этапа 5.
+   и однозначно найдена в тексте требования, которое было отправлено модели, и проходит
+   Evidence Gate (gate_findings) — те же проверки, что для замечаний правил. Статус
+   остаётся «unverified»: правильный JSON и точная цитата доказывают происхождение текста,
+   но не сам дефект. Подтвердить гипотезу может только смысловая проверка (следующие этапы).
 4. Ошибки провайдера не скрываются: они поднимаются к вызывающему коду.
 """
 
@@ -21,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from validator.config import Settings
-from validator.evidence import build_evidence, check_finding
+from validator.evidence import build_evidence, gate_findings
 from validator.findings import Finding
 from validator.llm.base import LLMProvider, LLMRequest
 from validator.llm.errors import ProviderResponseError
@@ -70,6 +71,7 @@ class LLMAnalysis:
     requirements_total: int
     hypotheses: tuple[Finding, ...]
     rejected: tuple[RejectedHypothesis, ...] = ()
+    document_sha256: str = ""  # документ, требования которого получила модель
 
     def __post_init__(self) -> None:
         for finding in self.hypotheses:
@@ -77,6 +79,11 @@ class LLMAnalysis:
                 raise ValueError(
                     f"Гипотеза LLM {finding.id} должна иметь origin=llm и статус unverified: "
                     "подтверждает замечания только проверка доказательств."
+                )
+            if finding.document_sha256 != self.document_sha256:
+                raise ValueError(
+                    f"Гипотеза LLM {finding.id} построена для другого документа "
+                    "(SHA-256 не совпадает)."
                 )
 
     @property
@@ -90,6 +97,7 @@ class LLMAnalysis:
             "provider": self.provider,
             "model": self.model,
             "prompt_version": self.prompt_version,
+            "document_sha256": self.document_sha256,
             "requests": self.requests,
             "requirements_sent": self.requirements_sent,
             "requirements_total": self.requirements_total,
@@ -104,7 +112,9 @@ class LLMAnalysis:
     def from_dict(cls, data: dict[str, Any]) -> LLMAnalysis:
         if data.get("schema") != SCHEMA:
             raise ValueError(f"Неизвестная схема LLM-анализа: {data.get('schema')!r}")
-        texts = [data.get(key) for key in ("provider", "model", "prompt_version")]
+        texts = [
+            data.get(key) for key in ("provider", "model", "prompt_version", "document_sha256")
+        ]
         numbers = [data.get(key) for key in ("requests", "requirements_sent", "requirements_total")]
         hypotheses, rejected = data.get("hypotheses"), data.get("rejected")
         if (
@@ -123,6 +133,7 @@ class LLMAnalysis:
             int(numbers[2]),  # type: ignore[arg-type]
             tuple(Finding.from_dict(item) for item in hypotheses),
             tuple(RejectedHypothesis.from_dict(item) for item in rejected),
+            str(texts[3]),
         )
 
     @classmethod
@@ -167,15 +178,28 @@ def analyze_with_llm(
             RejectedHypothesis(offset + item.index, item.requirement_id, item.reasons)
             for item in parsed.rejected
         ]
+        drafts: dict[str, tuple[int, Finding]] = {}
         for hypothesis in parsed.hypotheses:
             index = offset + hypothesis.index
-            result = _to_finding(hypothesis, sent, document, segmentation)
-            if isinstance(result, Finding) and result.id in hypotheses:
+            result = _to_finding(hypothesis, sent, document)
+            if isinstance(result, Finding) and (result.id in hypotheses or result.id in drafts):
                 result = [f"Гипотеза — повтор уже принятой {result.id}."]
             if isinstance(result, Finding):
-                hypotheses[result.id] = result
+                drafts[result.id] = (index, result)
             else:
                 rejected.append(RejectedHypothesis(index, hypothesis.requirement_id, tuple(result)))
+        # Тот же Evidence Gate, что и для правил; каталога для LLM нет, поэтому статус
+        # прошедших проверку гипотез — «unverified», а не «verified».
+        gate = gate_findings(
+            [finding for _, finding in drafts.values()], segmentation, document, rules=()
+        )
+        hypotheses.update((finding.id, finding) for finding in gate.unverified)
+        rejected += [
+            RejectedHypothesis(
+                drafts[item.finding.id][0], item.finding.requirement_ids[0], item.reasons
+            )
+            for item in gate.rejected
+        ]
         offset += len(parsed.hypotheses) + len(parsed.rejected)
     sent_count = sum(len(batch) for batch in batches)
     log.info(
@@ -198,6 +222,7 @@ def analyze_with_llm(
         requirements_total=len(targets),
         hypotheses=tuple(hypotheses.values()),
         rejected=tuple(rejected),
+        document_sha256=document.sha256,
     )
 
 
@@ -219,25 +244,34 @@ def _batches(targets: Sequence[Requirement], options: LLMOptions) -> list[list[R
 
 
 def _to_finding(
-    hypothesis: Hypothesis,
-    sent: dict[str, Requirement],
-    document: Document,
-    segmentation: Segmentation,
+    hypothesis: Hypothesis, sent: dict[str, Requirement], document: Document
 ) -> Finding | list[str]:
+    """Гипотеза → черновик замечания с цитатой, привязанной к документу.
+
+    Цитата ищется только в тексте того требования, которое назвала модель и которое ей
+    передавалось: совпадение в другом месте документа доказательством не считается.
+    Неоднозначная цитата (встречается в требовании несколько раз) не принимается.
+    """
     fragment = sent.get(hypothesis.requirement_id)
     if fragment is None:
         return [
             f"Требование {hypothesis.requirement_id} не передавалось модели в этом запросе "
             "(неизвестный ID)."
         ]
-    start = fragment.text.find(hypothesis.quote)
-    if start < 0:
+    occurrences = fragment.text.count(hypothesis.quote)
+    if occurrences == 0:
         return ["Гипотеза без доказательства: цитата не найдена дословно в тексте требования."]
+    if occurrences > 1:
+        return [
+            f"Цитата встречается в требовании несколько раз ({occurrences}) — место "
+            "доказательства неоднозначно."
+        ]
+    start = fragment.text.index(hypothesis.quote)
     try:
         evidence = build_evidence(fragment, start, start + len(hypothesis.quote), document)
     except ValueError as error:
         return [str(error)]
-    finding = Finding(
+    return Finding(
         id=f"{RULE_ID}:{fragment.id}@{start}",
         rule_id=RULE_ID,
         rule_version=f"prompt-{PROMPT_VERSION}",
@@ -252,6 +286,5 @@ def _to_finding(
         evidence_kind="quote",
         evidence_status="unverified",
         origin="llm",
+        document_sha256=document.sha256,
     )
-    problems = check_finding(finding, segmentation, document)
-    return list(problems) if problems else finding

@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from validator.findings import AbsenceClaim
 from validator.ingest.common import one_line
 from validator.lint.base import Hit, LintContext, Span
 from validator.model import Block
@@ -32,7 +33,9 @@ def _lead(context: LintContext, fragment: Requirement) -> Span:
     end = len(fragment.text)
     if end - start > _LEAD_LIMIT:
         cut = fragment.text.rfind(" ", start, start + _LEAD_LIMIT)
-        end = cut if cut > start else start + _LEAD_LIMIT
+        if cut <= start:  # первое слово длиннее лимита — цитата не обрывается посреди слова
+            cut = fragment.text.find(" ", start + _LEAD_LIMIT)
+        end = cut if cut > start else end
     return Span(fragment, start, end)
 
 
@@ -57,6 +60,7 @@ def _unfilled(fragment: Requirement, start: int, end: int, label: str) -> Hit:
         (Span(fragment, start, end),),
         f"Значение «{one_line(label).strip()}» не заполнено (пусто или прочерк): "
         "неясно, «значения нет» это или пропуск.",
+        absence=AbsenceClaim("requirement", fragment.id, "value"),
     )
 
 
@@ -171,6 +175,7 @@ def cmp05(context: LintContext) -> Iterator[Hit]:
                 tuple(spans),
                 f"В таблице нет заполненных строк данных (строк: {len(table.rows)}): "
                 "заполнена только шапка.",
+                absence=AbsenceClaim("table", str(table.number), "data"),
             )
 
 
@@ -209,6 +214,7 @@ def cmp06(context: LintContext) -> Iterator[Hit]:
             (Span(fragment, start, end),),
             f"Ссылка «{one_line(fragment.text[start:end])}»: раздела с номером "
             f"{match.group('num')} в документе нет.",
+            absence=AbsenceClaim("heading_registry", match.group("num"), "heading"),
         )
 
 
@@ -238,6 +244,7 @@ def cmp07(context: LintContext) -> Iterator[Hit]:
                 (Span(heading, 0, len(heading.text)),),
                 f"Под заголовком с идентификатором «{declared}» нет текста требования: "
                 "идентификатор есть, требования нет.",
+                absence=AbsenceClaim("section", " › ".join(path), "text"),
             )
 
 
@@ -353,6 +360,7 @@ def trc01(context: LintContext) -> Iterator[Hit]:
                 (_lead(context, fragment),),
                 f"Рядом {len(numbered)} требований с идентификаторами, у этого идентификатора "
                 "нет: на него нельзя сослаться и проследить его реализацию.",
+                absence=AbsenceClaim("requirement", fragment.id, "document_id"),
             )
 
 
@@ -417,6 +425,7 @@ def trc03(context: LintContext) -> Iterator[Hit]:
             yield Hit(
                 (Span(fragment, start, end),),
                 f"Ссылка на «{target}»: требования с таким идентификатором в документе нет.",
+                absence=AbsenceClaim("id_registry", target, "declaration"),
             )
 
 
@@ -492,4 +501,5 @@ def trc06(context: LintContext) -> Iterator[Hit]:
                 (span,),
                 f"Идентификатор «{first}» подразумевает родительский «{parent}», но такого "
                 f"идентификатора в документе нет (дочерних идентификаторов: {len(ids)}).",
+                absence=AbsenceClaim("id_registry", parent, "declaration"),
             )
