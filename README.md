@@ -12,6 +12,10 @@ IEEE 830-1998 п. 4.3). Каждое замечание в отчёте подк
 > «не подтверждено»: точная цитата не доказывает смысл (смысловая проверка, сводка и итог —
 > следующие этапы).
 
+Продолжение разработки: [HANDOFF.md](HANDOFF.md) (с чего начать),
+[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) (контекст и архитектура),
+[DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) (Stage 9–11).
+
 ## Быстрый старт (Windows / PowerShell)
 
 ```powershell
