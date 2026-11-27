@@ -8,12 +8,13 @@ Findings). Хакатон BCC-HUB × MNU FinTech.
 
 1. [HANDOFF.md](HANDOFF.md) — правила работы, проверка окружения, порядок закрытия этапа.
 2. [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) — назначение, архитектура, инварианты, история
-   Stage 0–8.
-3. [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) — задания Stage 9, 10, 11.
+   Stage 0–9.
+3. [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) — задания Stage 10, 11 (и описание
+   выполненного Stage 9).
 
 Главное:
 
-- Stage 0–8 завершены. Следующий — **Stage 9**; этапы 9 → 10 → 11 строго по очереди, каждый —
+- Stage 0–9 завершены. Следующий — **Stage 10**; этапы 10 → 11 строго по очереди, каждый —
   отдельный проверенный коммит `Stage N: …` и push без force.
 - Не переписывать архитектуру и не дублировать существующие механизмы.
 - Гипотеза LLM никогда не становится `verified`; Evidence Gate не ослаблять.

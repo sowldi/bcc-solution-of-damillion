@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.graph_helpers import load, relation, relations_json
+from tests.graph_helpers import GRAPH_SPEC, load, relation, relations_json
+from tests.lint_helpers import HEAD
 from tests.llm_helpers import findings_json, hypothesis
 from validator.graph import build_fact_graph
 from validator.ingest import load_document
@@ -18,6 +19,7 @@ from validator.model import Block, Document, Location
 from validator.passport import RunPassport
 from validator.quality import analyze_quality
 from validator.report import render_report
+from validator.scoring import assess
 from validator.segmentation import Segmentation, segment_document
 
 
@@ -259,8 +261,8 @@ def test_report_footer_names_current_stage(tmp_path: Path) -> None:
 
     text = render_report(_passport(NOON), document, segmentation, lint)
 
-    assert "> Агент на этапе 8:" in text
-    assert text.rstrip().endswith("смысловая проверка гипотез появятся на следующих этапах.")
+    assert "> Агент на этапе 9:" in text
+    assert text.rstrip().endswith("итог построен только на подтверждённых замечаниях.")
 
 
 # --- раздел 5: гипотезы LLM ---------------------------------------------------------------
@@ -447,7 +449,7 @@ def _section6(
         crosscheck=crosscheck,
     )
     start = text.index("## 6. Связи между требованиями (Fact Graph)")
-    return text[start : text.index("> Агент на этапе 8:")]
+    return text[start : text.index("> Агент на этапе 9:")]
 
 
 def test_graph_section_shows_verified_dependency_with_both_quotes(tmp_path: Path) -> None:
@@ -641,7 +643,7 @@ def _section7(tmp_path: Path, markdown: str = QUALITY_SPEC, *, rules_only: bool 
         crosscheck=crosscheck,
         quality=quality,
     )
-    return text[text.index("## 7.") : text.index("> Агент на этапе 8:")]
+    return text[text.index("## 7.") : text.index("> Агент на этапе 9:")]
 
 
 def test_confirmed_contradiction_shows_counterexample(tmp_path: Path) -> None:
@@ -698,3 +700,130 @@ def test_document_without_acceptance_criteria_is_an_explicit_observation(tmp_pat
 
     assert "Критерии приёмки в документе не выделены" in section
     assert "агент их не распознал" in section
+
+
+# --- разделы 8–10: оценка, сводка, итог (этап 9) -----------------------------------------
+
+FORBIDDEN = ("документ корректен", "ошибок нет", "противоречий нет", "все пары проверены")
+
+
+def _scored_report(tmp_path: Path, markdown: str, *, rules_only: bool = True, **llm: object) -> str:
+    built = load(tmp_path, markdown)
+    passport = _passport(NOON)
+    quality = analyze_quality(built.document, built.segmentation, built.lint, built.graph)
+    analysis = crosscheck = None
+    if rules_only:
+        passport = replace(passport, provider=None, model=None, mode="rules-only")
+    else:
+        options = LLMOptions(max_retries=0, max_requests=3, max_pair_requests=1)
+        analysis = review_requirements(
+            built.document, built.segmentation, FakeProvider(*llm.get("review", ())), options
+        )
+        crosscheck = crosscheck_pairs(
+            built.document, built.segmentation, built.graph, FakeProvider(), options
+        )
+        quality = quality.with_hypotheses(crosscheck.hypotheses)
+    card = assess(
+        built.segmentation,
+        built.lint,
+        built.graph,
+        quality,
+        analysis=analysis,
+        crosscheck=crosscheck,
+        mode=passport.mode,
+    )
+    text = render_report(
+        passport,
+        built.document,
+        built.segmentation,
+        built.lint,
+        analysis,
+        graph=built.graph,
+        crosscheck=crosscheck,
+        quality=quality,
+        scorecard=card,
+    )
+    return text[text.index("## 8.") : text.index("> Агент на этапе 9:")]
+
+
+def test_sections_8_to_10_follow_section_7_and_name_the_verdict(tmp_path: Path) -> None:
+    section = _scored_report(tmp_path, QUALITY_SPEC)
+
+    assert section.index("## 8. Проверка каждого требования") < section.index("## 9. Сводка")
+    assert section.index("## 9. Сводка") < section.index("## 10. Итог")
+    assert "**Вердикт: Начинать разработку и тестирование не рекомендуется.**" in section
+    assert "| Ф-1 | Ф-1 | Есть подтверждённые существенные дефекты | 1 / 0 | 1 / 0 |" in section
+    assert "1. `CTR-01:Ф-1@" in section  # противоречие — первым в списке исправлений
+    assert "— подтверждённое противоречие" in section
+
+
+def test_per_requirement_table_shows_what_was_checked(tmp_path: Path) -> None:
+    rules_only = _scored_report(tmp_path, QUALITY_SPEC)
+    standard = _scored_report(tmp_path, QUALITY_SPEC, rules_only=False)
+
+    assert "| не использовался | не использовалась |" in rules_only
+    assert "| проверено |" in standard
+    assert "| нет: лимит |" in standard  # бюджет 3 из 8
+    assert "- Модель проверила требований: 3 из " in standard
+
+
+def test_review_items_are_separate_from_confirmed_defects(tmp_path: Path) -> None:
+    review = findings_json(hypothesis("Ф-1", "не более 3 дней", category="testability"))
+
+    section = _scored_report(tmp_path, QUALITY_SPEC, rules_only=False, review=(review,))
+
+    fix = section[
+        section.index("### Приоритет исправлений") : section.index("### Проверить человеком")
+    ]
+    check = section[section.index("### Проверить человеком") : section.index("### Ограничения")]
+    assert "LLM:" not in fix
+    assert "(гипотеза модели, предполагаемая важность: существенное)" in check
+    assert "Гипотезы модели о дефектах (раздел 5, не подтверждены): 1" in section
+
+
+@pytest.mark.parametrize(
+    ("markdown", "verdict"),
+    [
+        ("* Ф-1. Бронь хранится около 3 дней.\n", "Можно начинать после исправления"),
+        ("* Ф-1. Курьер доставляет посылку адресату.\n", "Подтверждённых препятствий не найдено"),
+    ],
+)
+def test_milder_verdicts_and_their_caveats(tmp_path: Path, markdown: str, verdict: str) -> None:
+    section = _scored_report(tmp_path, HEAD + markdown)
+
+    assert f"**Вердикт: {verdict}" in section
+    assert "- Модель не использовалась (режим --rules-only)" in section
+    assert "не позволяют утверждать, что других дефектов в документе нет" in section
+
+
+def test_document_without_requirements_cannot_be_assessed(tmp_path: Path) -> None:
+    section = _scored_report(tmp_path, "# Сервис\n\n## Введение\n\nОбщее описание библиотеки.\n")
+
+    assert "Атомарных требований нет — карточки не строятся." in section
+    assert "**Вердикт: Оценить нельзя: требования в документе не выделены.**" in section
+    assert "Подтверждённых препятствий" not in section
+
+
+@pytest.mark.parametrize("rules_only", [True, False])
+def test_scoring_sections_never_overclaim(tmp_path: Path, rules_only: bool) -> None:
+    for markdown in (QUALITY_SPEC, HEAD + "* Ф-1. Курьер доставляет посылку адресату.\n"):
+        lowered = _scored_report(tmp_path, markdown, rules_only=rules_only).casefold()
+        for phrase in FORBIDDEN:
+            assert phrase not in lowered
+
+
+def test_rules_only_review_list_does_not_imply_the_model_found_nothing(tmp_path: Path) -> None:
+    clean = HEAD + "* Ф-1. Курьер доставляет посылку адресату.\n"
+    rules_only = _scored_report(tmp_path, clean)
+    standard = _scored_report(tmp_path, clean, rules_only=False)
+
+    assert "модель не использовалась — гипотез о дефектах нет, потому что их никто не искал" in (
+        rules_only
+    )
+    assert "гипотезы модели и потенциальные противоречия не найдены" in standard
+
+
+def test_rules_only_caveats_name_unchecked_candidate_pairs(tmp_path: Path) -> None:
+    section = _scored_report(tmp_path, GRAPH_SPEC)
+
+    assert "- Пар-кандидатов для проверки моделью: 6 — не проверялись." in section

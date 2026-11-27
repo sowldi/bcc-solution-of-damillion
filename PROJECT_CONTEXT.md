@@ -1,7 +1,8 @@
 # PROJECT_CONTEXT — контекст проекта AI Requirements Validator
 
 Документ для разработчика и Claude Code, которые продолжают проект без доступа к прежней
-переписке. Описано фактическое состояние кода на коммите `797ef39` (Stage 8). Порядок чтения
+переписке. Описано фактическое состояние кода после Stage 9 (коммит этапа — см.
+`git log --oneline`, сообщение `Stage 9: …`). Порядок чтения
 и правила работы — в [HANDOFF.md](HANDOFF.md), план оставшихся этапов — в
 [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md), подробности каждого механизма — в
 [README.md](README.md).
@@ -89,8 +90,11 @@ load_settings (только в стандартном режиме; --rules-only
   → analyze_quality(document, seg, lint, graph) [+ .with_hypotheses(crosscheck.hypotheses)]
                                             validator/quality    → QualityResult
   → build_passport(...)                     validator/passport.py → RunPassport
+  → assess(seg, lint, graph, quality, analysis=..., crosscheck=..., mode=...)
+                                            validator/scoring    → Scorecard
   → render_report(passport, document, seg, lint, analysis,
-                  graph=..., crosscheck=..., quality=...)  validator/report/markdown.py
+                  graph=..., crosscheck=..., quality=..., scorecard=...)
+                                            validator/report/markdown.py
   → ensure_source_unchanged(document)       файл не менялся во время проверки (иначе код 2)
   → write_text_atomic(output, report)       validator/report/writer.py
 ```
@@ -114,6 +118,7 @@ LLM-слой импортируется лениво (`from validator import llm
 | `validator/lint/` | каталог из 26 детерминированных правил и движок | `CATALOG`, `run_lint`, `LintResult` |
 | `validator/llm/` | провайдеры, транспорт, повторы и RPM, строгая схема ответов, промпты, обзор требований, проверка пар, тестовые подделки | `create_provider`, `review_requirements`, `crosscheck_pairs`, `LLMOptions`, `LLMAnalysis`, `CrossCheckAnalysis`, `FakeProvider` |
 | `validator/graph/` | Fact Graph: узлы, рёбра, отбор пар-кандидатов | `build_fact_graph`, `FactGraph`, `GraphEdge`, `CandidateSelection`, `rank_candidates`, `XRF_01` |
+| `validator/scoring/` | Stage 9: карточки требований, сводка, вердикт (без новых проверок и запросов к модели) | `assess`, `Scorecard`, `STATUS_TITLES`, `VERDICT_TITLES` |
 | `validator/quality/` | Stage 8: противоречия, критерии приёмки, полнота | `analyze_quality`, `QualityResult`, `Contradiction`, `parse_constraint`, `compare_constraints` |
 | `validator/passport.py`, `version.py` | паспорт прогона; версия агента = версия пакета + `git describe` | `RunPassport`, `agent_version` |
 | `validator/report/` | Markdown-отчёт и атомарная запись | `render_report`, `write_text_atomic` |
@@ -247,13 +252,14 @@ python -m validator <документ> <отчёт.md> [--rules-only] [--provide
 | 5. Анализ LLM (гипотезы, не подтверждены) | `LLMAnalysis` | 4, 6 |
 | 6. Связи между требованиями (Fact Graph) | `FactGraph`, `CrossCheckAnalysis` | 7, 7.1 |
 | 7. Противоречия, критерии приёмки и полнота | `QualityResult` | 8 |
-| строка «> Агент на этапе 8: …» | — | обновляется каждым этапом |
-
-Разделов **«Сводка»** и **«Итог»**, которых требует ТЗ, пока нет — это Stage 9.
+| 8. Проверка каждого требования | `Scorecard.requirements` | 9 |
+| 9. Сводка | `Scorecard` | 9 |
+| 10. Итог | `Scorecard.verdict`, приоритеты, «проверить человеком», ограничения | 9 |
+| строка «> Агент на этапе 9: …» | — | обновляется каждым этапом |
 
 ### Тестовая инфраструктура
 
-- 896 тестов (`pytest`), все без сети и без настоящих ключей.
+- 928 тестов (`pytest`), все без сети и без настоящих ключей.
 - `tests/conftest.py`: каждый тест в пустой папке, переменные агента (`AGENT_ENV_VARS`)
   очищены; фикстура `run_cli` запускает настоящую команду `python -m validator` в отдельном
   процессе.
@@ -285,16 +291,20 @@ python -m validator <документ> <отчёт.md> [--rules-only] [--provide
 | 7 | `49d09b9` | Fact Graph, XRF-01, импорт CON-03, отбор кандидатов, `crosscheck_pairs`, `LLM_MAX_PAIR_REQUESTS`, общий RateLimiter, `Finding.relation`, раздел 6 | `relation` в JSON только если задан — JSON этапов 5–6 не изменился |
 | 7.1 | `4857ceb` | формы слов без жадного усечения; `MAX_CANDIDATES = 1000`, память O(n + 1000); прозрачное покрытие в отчёте | производные («проверить»/«проверка») не объединяются — сознательный выбор точности |
 | 8 | `797ef39` | `validator/quality`: CTR-01, CTR-02, ACC-01, классификация CON-03, гипотезы как потенциальные, раздел 7 | новых запросов к модели нет; правила этапа 8 вне каталога lint |
+| — | `fa65212`, `b93a985` | документация передачи; замена двух примеров этапа 2, совпадавших с официальным документом | логика не менялась |
+| 9 | `Stage 9: …` | `validator/scoring`: статусы требований, сводка, вердикт, приоритеты, «проверить человеком», ограничения вывода; разделы 8–10, строка «Итог» в CLI | CTR-02 — не подтверждённый дефект, а потенциальное противоречие; гипотезы и `confidence` на итог не влияют; без баллов и процентов |
 
 Число тестов по этапам: 33 → 127 → 239 → 292 → 421 → … → 714 (6.2) → 804 (7) → 839 (7.1)
-→ 896 (8).
+→ 896 (8) → 928 (9).
 
 ### Эталон регрессии
 
 Детерминированный результат (`--rules-only`) официального документа в формате MD после
 Stage 8: 59 атомарных требований, 5 подтверждённых замечаний правил, 93 пары-кандидата,
-0 утверждений «параметр — значение», 3 критерия приёмки. Разделы 1–6 отчёта Stage 8
-совпадают с отчётом Stage 7.1 (кроме даты и версии агента). Варианты DOCX/PDF/TXT
+0 утверждений «параметр — значение», 3 критерия приёмки; после Stage 9 вердикт
+`--rules-only` — «Начинать разработку и тестирование не рекомендуется» (2 существенных
+дефекта полноты, всего 5 подтверждённых). Разделы 1–7 отчёта Stage 9 совпадают с
+отчётом Stage 8 (кроме даты и версии агента). Варианты DOCX/PDF/TXT
 официального документа конвертировались локально и в репозиторий не входят; при
 отсутствии их сравнивайте только MD. Новый этап не должен менять эти числа без объяснения.
 
@@ -333,5 +343,7 @@ Stage 8: 59 атомарных требований, 5 подтверждённ�
   свободном тексте сравнивает только модель.
 - Сценарии приёмки распознаются по ключевым словам в начале пункта.
 - Строка `.validator_cache/` в `.gitignore` зарезервирована: кэш ответов LLM не реализован.
-- В отчёте нет сводки и итога (Stage 9); нет evaluation-набора (Stage 10); README
-  ориентирован на разработчика, а не на демонстрацию (Stage 11).
+- Пороги вердикта Stage 9 фиксированы в коде и не настраиваются; итог отражает только
+  подтверждённое правилами.
+- Нет evaluation-набора (Stage 10); README ориентирован на разработчика, а не на
+  демонстрацию (Stage 11).

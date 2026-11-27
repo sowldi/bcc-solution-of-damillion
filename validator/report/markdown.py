@@ -13,7 +13,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from validator.criteria import criterion
 from validator.findings import (
@@ -27,6 +27,7 @@ from validator.findings import (
     AbsenceClaim,
     Evidence,
     Finding,
+    ReviewCategory,
     Severity,
 )
 from validator.graph import FactGraph, GraphEdge
@@ -35,6 +36,13 @@ from validator.lint import LintResult
 from validator.model import FORMAT_TITLES, Document
 from validator.passport import RunPassport
 from validator.quality import Contradiction, QualityResult
+from validator.scoring import (
+    STATUS_TITLES,
+    VERDICT_TITLES,
+    DefectRef,
+    ReviewRef,
+    Scorecard,
+)
 from validator.segmentation import CATEGORY_TITLES, Requirement, Segmentation
 from validator.segmentation.text import parse_prefix
 
@@ -975,6 +983,252 @@ def _quality_section(
     return "\n\n".join(parts)
 
 
+_ITEMS_LIMIT = 10  # сколько пунктов «исправить» и «проверить» показывать в итоге
+_LLM_REVIEW_TITLES: dict[str, str] = {
+    "reviewed": "проверено",
+    "budget": "нет: лимит",
+    "empty": "нет: пустой текст",
+    "no_source": "нет: нет источника",
+    "not_used": "не использовался",
+}
+_PAIR_TITLES: dict[str, str] = {
+    "checked": "проверено",
+    "not_checked": "кандидат не проверен",
+    "no_candidate": "нет пары-кандидата",
+    "excluded": "вне графа",
+    "not_used": "не использовалась",
+    "disabled": "отключена",
+}
+_REJECTED_TITLES: dict[str, str] = {
+    "rules": "замечания правил (раздел 4)",
+    "stage8-rules": "замечания правил этапа 8 (раздел 7)",
+    "graph-rules": "связи правил (раздел 6)",
+    "llm-review": "ответы модели при обзоре требований (раздел 5)",
+    "llm-pairs": "ответы модели о парах (раздел 6)",
+}
+
+
+def _requirements_section(scorecard: Scorecard) -> str:
+    parts = [
+        "## 8. Проверка каждого требования",
+        "Карточка каждого атомарного требования по результатам разделов 4–7: подтверждённые "
+        "дефекты (замечания со статусом verified), участие в противоречиях, гипотезы модели и "
+        "какие проверки выполнены. Статус — категория, а не балл. «Замечаний нет» значит "
+        "только, что перечисленные проверки ничего не нашли, а не что требование корректно.",
+    ]
+    if not scorecard.requirements:
+        parts.append("Атомарных требований нет — карточки не строятся.")
+        return "\n\n".join(parts)
+    parts.append(
+        _grid(
+            (
+                "ID",
+                "ID в документе",
+                "Статус",
+                "Подтверждено: сущ. / незнач.",
+                "Противоречия: подтв. / потенц.",
+                "Гипотезы модели",
+                "LLM-обзор",
+                "Проверка пар",
+            ),
+            [
+                (
+                    item.requirement_id,
+                    item.doc_id or "—",
+                    STATUS_TITLES[item.status],
+                    f"{len(item.confirmed_major)} / {len(item.confirmed_minor)}",
+                    f"{len(item.contradictions_confirmed)} / {len(item.contradictions_potential)}",
+                    str(len(item.hypotheses)),
+                    _LLM_REVIEW_TITLES[item.llm_review],
+                    _PAIR_TITLES[item.pair_check],
+                )
+                for item in scorecard.requirements
+            ],
+        )
+    )
+    return "\n\n".join(parts)
+
+
+def _defect_line(number: int, item: DefectRef) -> str:
+    mark = " — подтверждённое противоречие" if item.contradiction else ""
+    return (
+        f"{number}. `{item.finding_id}` — {item.rule_id} · {_escape(item.title)} "
+        f"({SEVERITY_TITLES[item.severity].lower()}, "
+        f"{RULE_CATEGORY_TITLES[item.category].lower()}){mark}; требования: "
+        f"{_ids(item.requirement_ids)}"
+    )
+
+
+def _review_line(number: int, item: ReviewRef) -> str:
+    source = "гипотеза модели" if item.source == "llm-review" else "потенциальное противоречие"
+    return (
+        f"{number}. `{item.item_id}` — {_escape(item.title)} ({source}, предполагаемая "
+        f"важность: {SEVERITY_TITLES[item.severity].lower()}); требования: "
+        f"{_ids(item.requirement_ids)}"
+    )
+
+
+def _summary_section(scorecard: Scorecard) -> str:
+    coverage = scorecard.coverage
+    defects = scorecard.defects
+    parts = [
+        "## 9. Сводка",
+        f"Требований (атомарных): {coverage.requirements}; неоднозначных фрагментов: "
+        f"{coverage.ambiguous}. Подтверждённых дефектов: {len(defects)}; подтверждённых "
+        f"противоречий: {scorecard.contradictions_confirmed}; на проверку человеку: "
+        f"{len(scorecard.review)}.",
+        _grid(
+            ("Статус требования", "Требований"),
+            [(STATUS_TITLES[status], str(count)) for status, count in scorecard.status_counts],
+        ),
+        "### Подтверждённые дефекты",
+    ]
+    if defects:
+        parts.append(
+            _grid(
+                ("Важность", "Дефектов"),
+                [
+                    (SEVERITY_TITLES[severity], str(count))
+                    for severity in SEVERITIES
+                    if (count := sum(1 for d in defects if d.severity == severity))
+                ],
+            )
+        )
+        by_criterion = Counter(d.criterion for d in defects)
+        parts.append(
+            _grid(
+                ("Критерий", "Дефектов"),
+                [
+                    (f"{criterion(code).reference} — {criterion(code).title}", str(count))
+                    for code, count in sorted(by_criterion.items())
+                ],
+            )
+        )
+        if scorecard.structural:
+            parts.append(
+                f"Из них к структуре документа (заголовки, таблицы), а не к отдельному "
+                f"требованию: {len(scorecard.structural)} — {_ids(scorecard.structural)}."
+            )
+    else:
+        parts.append(
+            "Подтверждённых дефектов не найдено — это результат перечисленных проверок, а не "
+            "доказательство качества документа."
+        )
+    critical = [d for d in defects if d.finding_id in scorecard.critical]
+    parts.append("### Критичные дефекты (непроверяемые, противоречивые, неполные формулировки)")
+    parts.append(
+        "\n".join(_defect_line(n, item) for n, item in enumerate(critical, 1))
+        if critical
+        else "Подтверждённых критичных дефектов не найдено."
+    )
+    lines = [
+        f"- Противоречия (раздел 7): подтверждено — {scorecard.contradictions_confirmed}, "
+        f"потенциальных — {scorecard.contradictions_potential}.",
+    ]
+    if coverage.llm_used:
+        categories = ", ".join(
+            f"{REVIEW_CATEGORY_TITLES[cast(ReviewCategory, key)].lower()} — {count}"
+            for key, count in scorecard.review_categories
+        )
+        relations = ", ".join(
+            f"{_ASSUMED_RELATIONS[key]} — {count}" for key, count in scorecard.relation_hypotheses
+        )
+        lines.append(
+            "- Гипотезы модели о дефектах (раздел 5, не подтверждены): "
+            f"{sum(c for _, c in scorecard.review_categories)}"
+            + (f" — {categories}." if categories else ".")
+        )
+        lines.append(
+            "- Гипотезы модели о связях (раздел 6, не подтверждены): "
+            f"{sum(c for _, c in scorecard.relation_hypotheses)}"
+            + (f" — {relations}." if relations else ".")
+        )
+    else:
+        lines.append("- Гипотезы модели: модель не использовалась.")
+    rejected = [(source, count) for source, count in scorecard.rejected if count]
+    lines.append(
+        "- Отклонено проверкой доказательств или схемой ответа (в отчёт как замечания не "
+        "вошли): "
+        + (
+            "; ".join(f"{_REJECTED_TITLES[source]} — {count}" for source, count in rejected)
+            if rejected
+            else "ничего"
+        )
+        + "."
+    )
+    lines.append(
+        f"- Информационные замечания (повод для проверки, не дефекты): {len(scorecard.info)}."
+    )
+    lines.append(
+        f"- Критерии приёмки: {scorecard.acceptance}; сценариев без ожидаемого результата: "
+        f"{scorecard.acceptance_scenarios}; требований, на которые ссылаются критерии: "
+        f"{scorecard.acceptance_links}."
+    )
+    review = (
+        f"{coverage.reviewed} из {coverage.requirements}"
+        if coverage.llm_used
+        else "не использовалась"
+    )
+    if coverage.pairs_disabled:
+        pairs = "отключена (LLM_MAX_PAIR_REQUESTS = 0)"
+    elif coverage.llm_used:
+        pairs = f"{coverage.pairs_checked} из {coverage.pairs_candidates} пар-кандидатов"
+    else:
+        pairs = "не использовалась"
+    lines.append(
+        f"- Покрытие: правила — все атомарные требования ({coverage.requirements}); модель — "
+        f"{review}; проверка пар моделью — {pairs}; исключено ограничением отбора — "
+        f"{coverage.truncated_pairs}; пар вне отбора — {coverage.outside_pairs}; требований "
+        f"вне графа — {coverage.excluded}."
+    )
+    parts += ["### Противоречия, гипотезы, отклонённое и покрытие", "\n".join(lines)]
+    return "\n\n".join(parts)
+
+
+def _verdict_section(scorecard: Scorecard) -> str:
+    parts = [
+        "## 10. Итог",
+        f"**Вердикт: {VERDICT_TITLES[scorecard.verdict]}.**",
+        "Основание:\n\n"
+        + "\n".join(f"- {_escape(reason)}" for reason in scorecard.verdict_reasons),
+        "Вердикт строится только на подтверждённых замечаниях: подтверждённое противоречие или "
+        "подтверждённый существенный дефект проверяемости или полноты — разработку начинать не "
+        "рекомендуется; другие подтверждённые дефекты — начинать после их исправления. "
+        "Гипотезы модели и потенциальные противоречия вердикт не меняют.",
+        "### Приоритет исправлений",
+    ]
+    shown = scorecard.defects[:_ITEMS_LIMIT]
+    if shown:
+        lines = [_defect_line(n, item) for n, item in enumerate(shown, 1)]
+        rest = len(scorecard.defects) - len(shown)
+        if rest > 0:
+            lines.append(f"\nИ ещё {rest} — полный список в разделах 4 и 7.")
+        parts.append("\n".join(lines))
+    else:
+        parts.append("Подтверждённых дефектов нет.")
+    parts.append("### Проверить человеком (не подтверждено)")
+    review = scorecard.review[:_ITEMS_LIMIT]
+    if review:
+        lines = [_review_line(n, item) for n, item in enumerate(review, 1)]
+        rest = len(scorecard.review) - len(review)
+        if rest > 0:
+            lines.append(f"\nИ ещё {rest} — полный список в разделах 5–7.")
+        parts.append("\n".join(lines))
+    else:
+        parts.append(
+            "Пунктов на проверку человеку нет: гипотезы модели и потенциальные противоречия "
+            "не найдены."
+            if scorecard.coverage.llm_used
+            else "Пунктов на проверку человеку нет: потенциальных противоречий правила не нашли, "
+            "а модель не использовалась — гипотез о дефектах нет, потому что их никто не искал."
+        )
+    parts += [
+        "### Ограничения вывода",
+        "\n".join(f"- {_escape(note)}" for note in scorecard.caveats),
+    ]
+    return "\n\n".join(parts)
+
+
 def render_report(
     passport: RunPassport,
     document: Document,
@@ -985,6 +1239,7 @@ def render_report(
     graph: FactGraph | None = None,
     crosscheck: CrossCheckAnalysis | None = None,
     quality: QualityResult | None = None,
+    scorecard: Scorecard | None = None,
 ) -> str:
     sections = [
         f"# Отчёт о проверке требований: {_cell(passport.document_name)}",
@@ -1002,10 +1257,16 @@ def render_report(
         sections.append(_graph_section(passport, graph, crosscheck))
     if quality is not None:
         sections.append(_quality_section(passport, quality, lint, llm, graph, crosscheck))
+    if scorecard is not None:
+        sections += [
+            _requirements_section(scorecard),
+            _summary_section(scorecard),
+            _verdict_section(scorecard),
+        ]
     sections.append(
-        "> Агент на этапе 8: замечания правил, связи графа и противоречия с машинным "
+        "> Агент на этапе 9: замечания правил, связи графа и противоречия с машинным "
         "контрпримером подтверждены Evidence Gate; гипотезы модели (обзор требований, "
-        "проверка пар) — с проверенными цитатами, но непроверенным смыслом; сводка, итог и "
-        "смысловая проверка гипотез появятся на следующих этапах."
+        "проверка пар) — с проверенными цитатами, но непроверенным смыслом; итог построен "
+        "только на подтверждённых замечаниях."
     )
     return "\n\n".join(sections) + "\n"

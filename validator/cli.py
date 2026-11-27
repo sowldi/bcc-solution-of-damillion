@@ -29,6 +29,7 @@ from validator.model import Document
 from validator.passport import build_passport
 from validator.quality import QualityResult, analyze_quality
 from validator.report import render_report, write_text_atomic
+from validator.scoring import VERDICT_TITLES, Scorecard, assess
 from validator.segmentation import Segmentation, segment_document
 
 if TYPE_CHECKING:  # LLM-слой импортируется лениво — только в стандартном режиме
@@ -89,6 +90,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         quality = analyze_quality(document, segmentation, lint, graph)
         if crosscheck is not None:
             quality = quality.with_hypotheses(crosscheck.hypotheses)
+        scorecard = assess(
+            segmentation,
+            lint,
+            graph,
+            quality,
+            analysis=analysis,
+            crosscheck=crosscheck,
+            mode="rules-only" if args.rules_only else "standard",
+        )
         passport = build_passport(
             document,
             settings,
@@ -107,6 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             graph=graph,
             crosscheck=crosscheck,
             quality=quality,
+            scorecard=scorecard,
         )
         # Доказательства привязаны к прочитанной версии файла: если файл изменился во время
         # проверки, отчёт был бы о другом документе — он не записывается.
@@ -139,6 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     _print_graph(graph, crosscheck)
     _print_quality(quality)
+    _print_verdict(scorecard)
     if lint.rejected:
         print(
             f"Предупреждение: {len(lint.rejected)} замечаний правил не прошли проверку "
@@ -171,6 +183,15 @@ def _print_quality(quality: QualityResult) -> None:
         f"Противоречий: подтверждено {len(quality.confirmed)}, потенциальных "
         f"{len(quality.potential)}; критериев приёмки: {len(quality.acceptance)}, "
         f"сценариев без ожидаемого результата: {scenarios}."
+    )
+
+
+def _print_verdict(scorecard: Scorecard) -> None:
+    major = sum(1 for d in scorecard.defects if d.severity in ("critical", "major"))
+    print(
+        f"Итог: {VERDICT_TITLES[scorecard.verdict]}. Подтверждённых дефектов: "
+        f"{len(scorecard.defects)} (существенных {major}); на проверку человеку: "
+        f"{len(scorecard.review)}."
     )
 
 

@@ -585,3 +585,22 @@ def test_standard_run_includes_the_quality_section(tmp_path: Path) -> None:
     text = report.read_text(encoding="utf-8")
     assert "## 7. Противоречия, критерии приёмки и полнота" in text
     assert "- Модель проверила " in text
+
+
+@pytest.mark.usefixtures("offline_llm")
+def test_cli_prints_the_verdict_and_writes_sections_8_to_10(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spec = tmp_path / "quality.md"
+    spec.write_text(QUALITY_DOC, encoding="utf-8")
+    report = tmp_path / "report.md"
+
+    assert main([str(spec), str(report)]) == EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "Итог: Начинать разработку и тестирование не рекомендуется." in out
+    assert "Подтверждённых дефектов: 1 (существенных 1)" in out
+    text = report.read_text(encoding="utf-8")
+    for heading in ("## 8. Проверка каждого требования", "## 9. Сводка", "## 10. Итог"):
+        assert heading in text
+    assert text.rstrip().endswith("итог построен только на подтверждённых замечаниях.")
