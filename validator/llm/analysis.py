@@ -17,11 +17,10 @@ from validator.llm.schema import RejectedHypothesis
 
 SCHEMA = "validator.llm-analysis/2"
 
-SkipReason = Literal["budget", "duplicate", "empty", "no_source"]
+SkipReason = Literal["budget", "empty", "no_source"]
 SKIP_REASONS: tuple[SkipReason, ...] = get_args(SkipReason)
 SKIP_TITLES: dict[SkipReason, str] = {
     "budget": "лимит запросов LLM_MAX_REQUESTS",
-    "duplicate": "дословный повтор",
     "empty": "пустой текст",
     "no_source": "некорректная привязка к источнику",
 }

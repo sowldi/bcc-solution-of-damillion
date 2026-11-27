@@ -1,16 +1,18 @@
 """LLM Review per requirement (этап 6): каждое атомарное требование проверяется отдельно.
 
 1. Требования берутся из сегментации (атомарные: утверждения и неделимые фрагменты).
-   Не отправляются: пустые, без корректной привязки к источнику, дословные повторы уже
-   выбранного требования и всё сверх бюджета LLM_MAX_REQUESTS — с причиной в результате.
-   Каждое требование отправляется не больше одного раза; запросы идут последовательно,
+   Не отправляются: пустые, без корректной привязки к источнику и всё сверх бюджета
+   LLM_MAX_REQUESTS — с причиной в результате. Одинаковый текст с другим ID проверяется
+   отдельно (другой контекст). Каждое требование (ID) отправляется не больше одного раза;
+   запросы идут последовательно,
    с ограничением частоты (LLM_RPM) и повтором только временных ошибок (LLM_MAX_RETRIES).
 2. Модели передаётся минимум: ID, точный текст, границы источника (SourceRef и место) и
    контекст для понимания — раздел и родительский фрагмент. Межтребовательный анализ
    (противоречия, зависимости) — не задача этого этапа.
 3. Ответ проверяется строгой схемой. Гипотеза принимается в работу, только если относится
-   именно к проверяемому требованию (ID по ответу модели не меняется) и её цитата один раз
-   дословно встречается в его тексте.
+   именно к проверяемому требованию (ID по ответу модели не меняется), её цитата один раз
+   дословно встречается в его тексте и содержательна (не ID и не короткое служебное слово).
+   При сбое провайдера обзор прерывается той же ошибкой с указанием требования и прогресса.
 4. Все гипотезы проходят Evidence Gate этапа 5. Прошедшие получают статус «unverified»:
    точная цитата доказывает происхождение текста, но не вывод модели. Отклонённые
    сохраняются с причинами. Уверенность модели (confidence) на статус не влияет.
@@ -21,13 +23,15 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
+from validator.errors import ProviderError
 from validator.evidence import build_evidence, gate_findings
 from validator.findings import Finding, ReviewCategory, RuleCategory, Severity
 from validator.llm.analysis import LLMAnalysis, LLMOptions, SkippedRequirement
 from validator.llm.base import LLMProvider, LLMRequest
-from validator.llm.errors import ProviderResponseError
+from validator.llm.errors import ProviderRateLimitError
 from validator.llm.prompts import PROMPT_VERSION, SYSTEM_PROMPT, build_user_message
 from validator.llm.retry import Clock, RateLimiter, Sleep, complete_with_retry
 from validator.llm.schema import Hypothesis, RejectedHypothesis, parse_hypotheses
@@ -38,6 +42,8 @@ from validator.segmentation.verify import body_start
 log = logging.getLogger("validator.llm")
 
 RULE_ID = "LLM"
+# Содержательная цитата: хотя бы одно слово или число из трёх и более символов.
+_MEANINGFUL = re.compile(r"[^\W_]{3,}")
 
 # Категория обзора → (группа замечаний, критерий качества, предполагаемая важность).
 REVIEW_MAPPING: dict[ReviewCategory, tuple[RuleCategory, str, Severity]] = {
@@ -64,7 +70,6 @@ def review_requirements(
     limiter = RateLimiter(options.rpm, clock=clock, sleep=sleep) if options.rpm else None
     reviewed: list[str] = []
     skipped: list[SkippedRequirement] = []
-    first_by_text: dict[str, str] = {}
     drafts: list[tuple[int, Finding]] = []
     rejected: list[RejectedHypothesis] = []
     offset = 0
@@ -73,18 +78,8 @@ def review_requirements(
         if problem is not None:
             skipped.append(problem)
             continue
-        # Сравнивается текст без ID в начале («Ф-1. …»), без нормализации — дословный повтор.
-        body = fragment.text[body_start(fragment, document) :].strip()
-        original = first_by_text.setdefault(body, fragment.id)
-        if original != fragment.id:
-            skipped.append(
-                SkippedRequirement(
-                    fragment.id,
-                    "duplicate",
-                    f"Дословный повтор требования {original} — проверяется один раз.",
-                )
-            )
-            continue
+        # Одинаковый текст с другим ID — другое требование со своим контекстом (раздел,
+        # родитель): оно проверяется отдельно, требования не объединяются (Stage 6.1).
         if len(reviewed) >= options.max_requests:
             skipped.append(
                 SkippedRequirement(
@@ -102,13 +97,20 @@ def review_requirements(
             max_output_tokens=options.max_output_tokens,
             temperature=options.temperature,
         )
-        response = complete_with_retry(
-            provider, request, max_retries=options.max_retries, sleep=sleep, limiter=limiter
-        )
         try:
+            response = complete_with_retry(
+                provider, request, max_retries=options.max_retries, sleep=sleep, limiter=limiter
+            )
             parsed = parse_hypotheses(response.text)
-        except ProviderResponseError as error:
-            raise ProviderResponseError(f"{provider.name} ({fragment.id}): {error}") from None
+        except ProviderError as error:
+            # Частичный сбой: тип ошибки (и код выхода) сохраняется, но сообщение говорит,
+            # на каком требовании прервался обзор и сколько требований успели проверить.
+            raise _interrupted(
+                error,
+                f"LLM-обзор прерван на требовании {fragment.id}: до сбоя проверено "
+                f"{len(reviewed) - 1} из {len(targets)}; частичные результаты не сохраняются. "
+                f"Причина ({provider.name}): {error}",
+            ) from None
         rejected += [
             RejectedHypothesis(offset + item.index, item.requirement_id, item.reasons)
             for item in parsed.rejected
@@ -164,6 +166,13 @@ def review_requirements(
     )
 
 
+def _interrupted(error: ProviderError, message: str) -> ProviderError:
+    """Та же ошибка с контекстом частичного сбоя: тип и код выхода не меняются."""
+    if isinstance(error, ProviderRateLimitError):
+        return ProviderRateLimitError(message, retry_after=error.retry_after)
+    return type(error)(message)
+
+
 def _not_reviewable(fragment: Requirement, document: Document) -> SkippedRequirement | None:
     """Пустое или некорректно сформированное требование модели не отправляется."""
     if not fragment.text.strip():
@@ -205,6 +214,14 @@ def _to_finding(
             "доказательства неоднозначно."
         ]
     start = fragment.text.index(quote)
+    # Цитата должна указывать на содержание требования: ID («Ф-1.»), номер пункта и
+    # короткое служебное слово («по», «и») встречаются один раз, но проблему не показывают.
+    content = fragment.text[max(start, body_start(fragment, document)) : start + len(quote)]
+    if not _MEANINGFUL.search(content):
+        return [
+            "Цитата слишком короткая или служебная (только ID, номер пункта или короткое "
+            "слово) — она не указывает на проблему в тексте требования."
+        ]
     try:
         evidence = build_evidence(fragment, start, start + len(quote), document)
     except ValueError as error:

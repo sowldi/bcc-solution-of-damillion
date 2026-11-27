@@ -36,7 +36,6 @@ if TYPE_CHECKING:  # отчёт не загружает LLM-слой: в реж�
 # Причины, по которым требование не отправлено модели (коды validator.llm.analysis).
 _SKIP_TITLES: dict[str, str] = {
     "budget": "лимит запросов LLM_MAX_REQUESTS",
-    "duplicate": "дословный повтор",
     "empty": "пустой текст",
     "no_source": "некорректная привязка к источнику",
 }
@@ -327,7 +326,13 @@ def _hypothesis_block(number: int, finding: Finding) -> str:
     ]
     if finding.confidence is not None:
         lines.append(f"- Уверенность модели: {finding.confidence:g} — на статус не влияет")
-    lines += [f"- Критерий: {item.reference} — {item.title}", "- Статус: не подтверждено"]
+    lines += [
+        f"- Критерий: {item.reference} — {item.title}",
+        "- Происхождение цитаты: проверено Evidence Gate (точный текст этого требования, "
+        "место в файле)",
+        "- Смысл замечания: не проверен — это гипотеза модели",
+        "- Статус: не подтверждено",
+    ]
     return "\n".join(lines)
 
 
@@ -354,7 +359,12 @@ def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | N
         "но не смысл замечания — статус остаётся «не подтверждено» до смысловой проверки.",
     ]
     if not analysis.hypotheses:
-        parts.append("Модель не предложила гипотез.")
+        parts.append(
+            "Модель не предложила гипотез по проверенным требованиям "
+            f"({analysis.requirements_sent} из {analysis.requirements_total})."
+            if analysis.skipped
+            else "Модель не предложила гипотез."
+        )
     parts += [
         _hypothesis_block(number, finding) for number, finding in enumerate(analysis.hypotheses, 1)
     ]
@@ -366,6 +376,15 @@ def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | N
                 + (f" (`{item.requirement_id}`)" if item.requirement_id else "")
                 + f": {_escape(' '.join(item.reasons))}"
                 for item in analysis.rejected
+            ),
+        ]
+    if analysis.skipped:
+        parts += [
+            f"### Требования без LLM-обзора ({len(analysis.skipped)})",
+            "Модель их не получала — это не значит, что проблем нет.",
+            "\n".join(
+                f"- `{item.requirement_id}` — {_SKIP_TITLES[item.code]}"
+                for item in analysis.skipped
             ),
         ]
     return "\n\n".join(parts)

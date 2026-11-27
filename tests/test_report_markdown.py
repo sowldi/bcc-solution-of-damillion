@@ -331,7 +331,8 @@ def test_absence_findings_show_their_bounded_scope(tmp_path: Path) -> None:
     assert "извлечённого из документа" in text
 
 
-def test_llm_section_lists_skipped_requirements(tmp_path: Path) -> None:
+def test_llm_section_lists_unreviewed_requirements_by_id(tmp_path: Path) -> None:
+    """Stage 6.1 (C): непроверенные требования названы по ID и не выглядят проверенными."""
     document, segmentation, lint = _linted(
         tmp_path,
         LLM_SPEC + "* Ф-2. Читатель отменяет бронь.\n* Ф-3. Читатель отменяет бронь.\n",
@@ -344,4 +345,16 @@ def test_llm_section_lists_skipped_requirements(tmp_path: Path) -> None:
     text = render_report(passport, document, segmentation, lint, analysis)
 
     assert "Проверено требований: 1 из 3" in text
-    assert "Не проверены: лимит запросов LLM_MAX_REQUESTS — 1, дословный повтор — 1." in text
+    assert "### Требования без LLM-обзора (2)" in text
+    assert "- `Ф-2` — лимит запросов LLM_MAX_REQUESTS" in text
+    assert "- `Ф-3` — лимит запросов LLM_MAX_REQUESTS" in text
+    assert "Модель не предложила гипотез по проверенным требованиям (1 из 3)." in text
+    assert "Модель не предложила гипотез.\n" not in text
+
+
+def test_llm_hypothesis_separates_quote_origin_from_meaning(tmp_path: Path) -> None:
+    """Stage 6.1 (B): происхождение цитаты проверено, смысл — нет; это видно у гипотезы."""
+    text = _with_llm(tmp_path, findings_json(hypothesis("Ф-1", "в течение рабочего дня")))
+
+    assert "- Происхождение цитаты: проверено Evidence Gate" in text
+    assert "- Смысл замечания: не проверен — это гипотеза модели" in text

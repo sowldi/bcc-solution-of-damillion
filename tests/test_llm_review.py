@@ -217,17 +217,41 @@ def test_request_carries_id_text_source_and_context(tmp_path: Path) -> None:
     assert data["context"]["parent"] == "Читатель выбирает:"
 
 
-def test_same_requirement_is_not_reviewed_twice(tmp_path: Path) -> None:
-    markdown = HEAD + (
-        "* Ф-1. Читатель отменяет бронь до выдачи книги.\n"
-        "* Ф-2. Читатель отменяет бронь до выдачи книги.\n"
+def test_same_text_with_different_ids_is_reviewed_separately(tmp_path: Path) -> None:
+    """Stage 6.1 (A): одинаковый текст в другом разделе — другое требование со своим
+    контекстом; его обзор не теряется и требования не объединяются."""
+    markdown = (
+        "# Сервис\n\n## Бронирование\n\n* Ф-1. Операция подтверждается в течение дня.\n\n"
+        "## Возврат книги\n\n* Ф-7. Операция подтверждается в течение дня.\n"
+    )
+    reply = findings_json(hypothesis("Ф-7", "в течение дня", category="missing_condition"))
+
+    analysis, provider, *_ = _review(tmp_path, EMPTY, reply, markdown=markdown)
+
+    assert analysis.reviewed == ("Ф-1", "Ф-7")
+    assert analysis.skipped == ()
+    sections = [_data(r.user)["context"]["section"] for r in provider.requests]
+    assert sections == ["Сервис › Бронирование", "Сервис › Возврат книги"]
+    assert [f.requirement_ids for f in analysis.hypotheses] == [("Ф-7",)]
+
+
+def test_each_requirement_id_is_sent_exactly_once(tmp_path: Path) -> None:
+    analysis, provider, *_ = _review(tmp_path)
+
+    sent = [_data(r.user)["requirement"]["id"] for r in provider.requests]
+    assert sent == list(analysis.reviewed)
+    assert len(set(sent)) == len(sent)
+
+
+def test_every_atomic_requirement_has_a_transparent_status(tmp_path: Path) -> None:
+    analysis, _, _, segmentation = _review(
+        tmp_path, options=LLMOptions(max_retries=0, max_requests=2)
     )
 
-    analysis, provider, *_ = _review(tmp_path, markdown=markdown)
-
-    assert len(provider.requests) == 1
-    assert analysis.reviewed == ("Ф-1",)
-    assert [(s.requirement_id, "повтор" in s.reason) for s in analysis.skipped] == [("Ф-2", True)]
+    statuses = {rid: "reviewed" for rid in analysis.reviewed}
+    statuses.update({item.requirement_id: item.code for item in analysis.skipped})
+    assert statuses == {"Ф-1": "reviewed", "Ф-2": "reviewed", "Ф-3": "budget"}
+    assert set(statuses) == {f.id for f in segmentation.atomic_requirements}
 
 
 # --- 3, 4: пустое и некорректное требование ------------------------------------------------------
@@ -533,3 +557,125 @@ def test_analysis_json_round_trip(tmp_path: Path) -> None:
     assert restored == analysis
     assert restored.skipped == analysis.skipped
     assert restored.hypotheses[0].confidence == 0.7
+
+
+# --- Stage 6.1 (B): слишком короткая или служебная цитата --------------------------------
+
+
+@pytest.mark.parametrize("quote", ["по", "Ф", "Ф-1.", "1."])
+def test_short_or_id_only_quote_is_rejected(tmp_path: Path, quote: str) -> None:
+    """Цитата из служебного слова или ID встречается один раз, но не указывает на проблему."""
+    markdown = HEAD + "* Ф-1. Читатель бронирует книгу по каталогу.\n"
+
+    analysis, *_ = _review(tmp_path, findings_json(hypothesis("Ф-1", quote)), markdown=markdown)
+
+    assert analysis.hypotheses == ()
+    assert "слишком коротк" in _reasons(analysis)
+
+
+def test_short_but_meaningful_quote_is_accepted(tmp_path: Path) -> None:
+    markdown = HEAD + "* Ф-1. Читатель бронирует книгу по каталогу.\n"
+
+    analysis, *_ = _review(
+        tmp_path, findings_json(hypothesis("Ф-1", "каталогу")), markdown=markdown
+    )
+
+    assert [f.evidence[0].quote for f in analysis.hypotheses] == ["каталогу"]
+
+
+# --- Stage 6.1 (E): частичный сбой ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "error", [ProviderServerError("HTTP 503"), ProviderTimeoutError("нет ответа за 120 с")]
+)
+def test_partial_failure_names_the_requirement_and_progress(
+    tmp_path: Path, error: Exception
+) -> None:
+    with pytest.raises(type(error)) as caught:
+        _review(tmp_path, EMPTY, EMPTY, error)
+
+    message = str(caught.value)
+    assert "Ф-3" in message
+    assert "проверено 2 из 3" in message
+    assert "не сохраняются" in message
+    assert str(error) in message
+
+
+def test_partial_failure_keeps_exit_code_and_retry_hint(tmp_path: Path) -> None:
+    from validator.llm.errors import ProviderModelError
+
+    with pytest.raises(ProviderRateLimitError) as limited:
+        _review(tmp_path, ProviderRateLimitError("429", retry_after=7))
+    with pytest.raises(ProviderModelError) as missing:
+        _review(tmp_path, EMPTY, ProviderModelError("модель не найдена"))
+
+    assert limited.value.retry_after == 7
+    assert missing.value.exit_code == ProviderModelError.exit_code
+    assert "Ф-2" in str(missing.value)
+
+
+# --- Stage 6.1 (D): ограничение частоты при последовательном обзоре ------------------------
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_sequential_review_respects_rpm(tmp_path: Path) -> None:
+    document, segmentation = _load(tmp_path)
+    clock, sleeps = _Clock(), []
+
+    review_requirements(
+        document,
+        segmentation,
+        FakeProvider(),
+        LLMOptions(max_retries=0, rpm=30),
+        sleep=sleeps.append,
+        clock=clock,
+    )
+
+    assert sleeps == [2.0, 2.0]  # 3 требования при 30 в минуту: интервал 2 с
+
+
+def test_rpm_wait_is_bounded_and_counts_elapsed_time(tmp_path: Path) -> None:
+    document, segmentation = _load(tmp_path)
+    clock, sleeps = _Clock(), []
+
+    class Slow(FakeProvider):
+        def complete(self, request: Any) -> Any:
+            clock.now += 25  # запрос сам длился 25 с
+            return super().complete(request)
+
+    review_requirements(
+        document,
+        segmentation,
+        Slow(),
+        LLMOptions(max_retries=0, rpm=1),
+        sleep=sleeps.append,
+        clock=clock,
+    )
+
+    assert sleeps == [35.0, 35.0]  # 60 с интервала минус 25 с запроса, не больше минуты
+    assert all(0 < pause <= 60 for pause in sleeps)
+
+
+def test_rate_limited_requirement_waits_retry_after_within_limiter(tmp_path: Path) -> None:
+    document, segmentation = _load(tmp_path)
+    clock, sleeps = _Clock(), []
+
+    review_requirements(
+        document,
+        segmentation,
+        FakeProvider(ProviderRateLimitError("429", retry_after=5)),
+        LLMOptions(max_retries=1, rpm=60),
+        sleep=sleeps.append,
+        clock=clock,
+    )
+
+    # пауза Retry-After (5 с), затем интервалы лимитера перед каждым следующим запросом
+    assert sleeps == [5.0, 1.0, 1.0, 1.0]

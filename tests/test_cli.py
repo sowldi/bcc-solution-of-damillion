@@ -453,3 +453,19 @@ def test_document_changed_during_run_is_not_reported(
     assert main([str(spec), str(report), "--rules-only"]) == EXIT_INPUT_ERROR
     assert "изменён" in capsys.readouterr().err
     assert not report.exists()
+
+
+def test_partial_llm_failure_is_reported_with_progress(run_cli: RunCli, tmp_path: Path) -> None:
+    """Stage 6.1 (E): первое требование проверено, на втором — сбой. Отчёт не пишется,
+    код 4 сохраняется, сообщение называет требование и сколько успели проверить."""
+    report = tmp_path / "report.md"
+    replies = (ollama_reply('{"findings": []}'), json_reply(503, {"error": "overloaded"}))
+
+    with stub_server(*replies) as server:
+        result = run_cli(str(_spec(tmp_path)), str(report), extra_env=_ollama_env(server))
+
+    assert result.returncode == EXIT_PROVIDER_ERROR
+    assert len(server.received) == 2
+    assert "Ф-2" in result.stderr
+    assert "проверено 1 из 2" in result.stderr
+    assert not report.exists()
