@@ -15,6 +15,7 @@ from validator.errors import EXIT_INTERNAL_ERROR, EXIT_OK, InputError, Validator
 from validator.ingest import SUPPORTED_SUFFIXES, load_document
 from validator.passport import build_passport
 from validator.report import render_report, write_text_atomic
+from validator.segmentation import segment_document
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -48,14 +49,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         document = load_document(args.input)
         for warning in document.warnings:
             print(f"Предупреждение: {warning}", file=sys.stderr)
+        segmentation = segment_document(document)
         passport = build_passport(document, settings, llm_used=False, started_at=started_at)
-        write_text_atomic(args.output, render_report(passport, document))
+        write_text_atomic(args.output, render_report(passport, document, segmentation))
     except ValidatorError as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
         return exc.exit_code
     except OSError as exc:
         print(f"Ошибка записи отчёта {args.output}: {exc.strerror or exc}", file=sys.stderr)
         return InputError.exit_code
+    print(
+        f"Требований: {len(segmentation.atomic_requirements)}, "
+        f"неоднозначных фрагментов: {len(segmentation.ambiguous)}."
+    )
     print(f"Отчёт записан: {args.output}")
     return EXIT_OK
 

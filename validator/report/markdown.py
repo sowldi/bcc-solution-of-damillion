@@ -1,14 +1,20 @@
 """Markdown-отчёт на русском.
 
-Этап 1: паспорт прогона и сводка извлечения текста. Разделы анализа добавляются далее.
+Этап 2: паспорт прогона, сводка извлечения текста и нарезка требований.
+Разделы анализа добавляются далее.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from validator.ingest.common import one_line
 from validator.model import FORMAT_TITLES, Document
 from validator.passport import RunPassport
+from validator.segmentation import CATEGORY_TITLES, Requirement, Segmentation
+from validator.segmentation.text import parse_prefix
+
+_BRIEF_LIMIT = 140
 
 
 def _cell(value: str) -> str:
@@ -75,10 +81,101 @@ def _extraction_section(document: Document) -> str:
     return section
 
 
-def render_report(passport: RunPassport, document: Document) -> str:
-    return (
-        f"# Отчёт о проверке требований: {_cell(passport.document_name)}\n\n"
-        f"{_passport_section(passport)}\n\n"
-        f"{_extraction_section(document)}\n\n"
-        "> Агент на этапе 1: текст извлечён, анализ требований ещё не подключён.\n"
-    )
+def _brief(fragment: Requirement) -> str:
+    """Дословная цитата в одну строку; ID документа в начале убран — он в отдельной колонке."""
+    text = fragment.text
+    if fragment.doc_id:
+        text = text[parse_prefix(text, "paragraph").body_start :]
+    text = one_line(text)
+    if len(text) <= _BRIEF_LIMIT:
+        return text
+    cut = text[:_BRIEF_LIMIT].rsplit(" ", 1)[0]
+    return f"{cut}…"
+
+
+def _grid(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(":---" for _ in header) + " |",
+    ]
+    lines += ["| " + " | ".join(_cell(value) for value in row) + " |" for row in rows]
+    return "\n".join(lines)
+
+
+def _segmentation_section(segmentation: Segmentation) -> str:
+    fragments = segmentation.fragments
+    composite = {f.parent_id for f in fragments if f.is_statement and f.role == "requirement"}
+    summary = [
+        ("Атомарных требований", str(len(segmentation.atomic_requirements))),
+        ("Составных фрагментов (разделены на утверждения)", str(len(composite))),
+        ("Неоднозначных фрагментов", str(len(segmentation.ambiguous))),
+        (
+            "Пояснений и примеров",
+            str(sum(1 for f in fragments if f.role in ("explanation", "example"))),
+        ),
+        ("Справочных фрагментов", str(sum(1 for f in fragments if f.role == "reference"))),
+        (
+            "Заголовков, шапок таблиц и кода",
+            str(sum(1 for f in fragments if f.role in ("heading", "table_header", "code"))),
+        ),
+    ]
+    parts = [
+        "## 3. Нарезка требований",
+        _table(summary).replace("| Поле |", "| Показатель |", 1),
+        "### Требования",
+    ]
+    atomic = segmentation.atomic_requirements
+    if atomic:
+        parts.append(
+            _grid(
+                ("ID", "ID в документе", "Тип", "Формулировка", "Место"),
+                [
+                    (
+                        f.id,
+                        f.doc_id or "—",
+                        CATEGORY_TITLES[f.category],
+                        _brief(f),
+                        f.location.describe(),
+                    )
+                    for f in atomic
+                ],
+            )
+        )
+    else:
+        parts.append("Требования не обнаружены.")
+    if segmentation.ambiguous:
+        parts += [
+            "### Неоднозначные фрагменты",
+            "Не считаются требованиями, пока это не подтверждено проверкой.",
+            _grid(
+                ("ID", "Формулировка", "Почему неоднозначно", "Место"),
+                [
+                    (f.id, _brief(f), f.warnings[0] if f.warnings else "—", f.location.describe())
+                    for f in segmentation.ambiguous
+                ],
+            ),
+        ]
+    notes = [f"- {warning}" for warning in segmentation.warnings]
+    notes += [
+        f"- `{f.id}`: {warning}"
+        for f in fragments
+        if f.role == "requirement"
+        for warning in f.warnings
+    ]
+    if notes:
+        parts += ["### Предупреждения сегментации", "\n".join(notes)]
+    return "\n\n".join(parts)
+
+
+def render_report(
+    passport: RunPassport, document: Document, segmentation: Segmentation | None = None
+) -> str:
+    sections = [
+        f"# Отчёт о проверке требований: {_cell(passport.document_name)}",
+        _passport_section(passport),
+        _extraction_section(document),
+    ]
+    if segmentation is not None:
+        sections.append(_segmentation_section(segmentation))
+    sections.append("> Агент на этапе 2: требования выделены, анализ качества ещё не подключён.")
+    return "\n\n".join(sections) + "\n"

@@ -115,7 +115,7 @@ def test_partially_bold_paragraph_is_not_heading(tmp_path: Path) -> None:
 
 def test_status_code_line_is_paragraph_not_list_item(tmp_path: Path) -> None:
     """Трёхзначное число в начале («200. Ответ…») — не номер пункта списка."""
-    text = "200. Ответ в случае успешного выполнения метода."
+    text = "200. Запрос обработан без ошибок."
     path = write_pdf(tmp_path / "status.pdf", [[P(BODY), P(text)]])
 
     block = _find(load_document(path), "200.")

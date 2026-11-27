@@ -217,7 +217,8 @@ def _text(
 
 
 def _table(page: pymupdf.Page, y: float, rows: tuple[tuple[str, ...], ...]) -> float:
-    col_width, row_height = 200, 22
+    # таблица должна умещаться между полями страницы (x от 50 до 545)
+    col_width, row_height = min(200, 495 // len(rows[0])), 22
     for i, row in enumerate(rows):
         for j, value in enumerate(row):
             rect = pymupdf.Rect(

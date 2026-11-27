@@ -143,6 +143,8 @@ def test_command_reads_every_supported_format(
     text = report.read_text(encoding="utf-8")
     assert "## 2. Извлечение текста" in text
     assert f"| Формат | {title} |" in text
+    assert "## 3. Нарезка требований" in text
+    assert "| R-1 | R-1 |" in text
 
 
 def test_reading_warnings_are_printed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

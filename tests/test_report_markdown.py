@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from validator.ingest import load_document
 from validator.model import Block, Document, Location
 from validator.passport import RunPassport
 from validator.report import render_report
+from validator.segmentation import Segmentation, segment_document
 
 
 def _passport(started_at: datetime) -> RunPassport:
@@ -90,6 +92,63 @@ def test_extraction_summary() -> None:
     ]:
         assert row in text
     assert "Кодировка" not in text  # для PDF кодировка не применяется
+
+
+def test_report_without_segmentation_keeps_stage_one_layout() -> None:
+    text = render_report(_passport(NOON), _document())
+
+    assert "Нарезка требований" not in text
+
+
+def _segmentation(tmp_path: Path, markdown: str) -> tuple[Document, Segmentation]:
+    path = tmp_path / "spec.md"
+    path.write_text(markdown, encoding="utf-8")
+    document = load_document(path)
+    return document, segment_document(document)
+
+
+def test_segmentation_section_lists_requirements_with_sources(tmp_path: Path) -> None:
+    document, segmentation = _segmentation(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n"
+        "* Ф-1. Читатель задаёт срок брони. По умолчанию бронь не продлевается.\n"
+        "* Система отправляет push | SMS.\n\n# Описание\n\nСистема должна хранить журнал.\n",
+    )
+
+    text = render_report(_passport(NOON), document, segmentation)
+
+    assert "## 3. Нарезка требований" in text
+    assert "| ID | ID в документе | Тип | Формулировка | Место |" in text
+    assert "| Ф-1/1 | Ф-1 | функциональное | Читатель задаёт срок брони. |" in text
+    assert "Функциональные требования — строка 5" in text
+    assert "push \\| SMS" in text  # ячейки таблицы экранируются
+    assert "### Неоднозначные фрагменты" in text
+    assert "Система должна хранить журнал." in text
+
+
+def test_report_quotes_original_text_not_normalized(tmp_path: Path) -> None:
+    document, segmentation = _segmentation(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n"
+        "* R-1. Кнопка «Забронировать» активна после выбора книги.\n",
+    )
+
+    text = render_report(_passport(NOON), document, segmentation)
+
+    assert (
+        "| R-1 | R-1 | функциональное | Кнопка «Забронировать» активна после выбора книги. |"
+        in text
+    )
+
+
+def test_segmentation_section_when_nothing_found(tmp_path: Path) -> None:
+    document, segmentation = _segmentation(
+        tmp_path, "# Заметки\n\nДокумент содержит справочную информацию.\n"
+    )
+
+    text = render_report(_passport(NOON), document, segmentation)
+
+    assert "Требования не обнаружены" in text
 
 
 def test_encoding_and_warnings_are_shown() -> None:

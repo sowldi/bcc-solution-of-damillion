@@ -20,8 +20,8 @@ TXT = """СПЕЦИФИКАЦИЯ СЕРВИСА
   с продолжением
 - Второй пункт
 
-1. Проверить сессию.
-2. Сохранить настройку.
+1. Проверить читательский билет.
+2. Выдать книгу.
 
 Итоги
 =====
@@ -41,8 +41,8 @@ EXPECTED = [
     ("heading", 2, "1.1 Требования", 8, 8, GENERAL),
     ("list_item", None, "Первый пункт\nс продолжением", 9, 10, REQS),
     ("list_item", None, "Второй пункт", 11, 11, REQS),
-    ("list_item", None, "1. Проверить сессию.", 13, 13, REQS),
-    ("list_item", None, "2. Сохранить настройку.", 14, 14, REQS),
+    ("list_item", None, "1. Проверить читательский билет.", 13, 13, REQS),
+    ("list_item", None, "2. Выдать книгу.", 14, 14, REQS),
     ("heading", 1, "Итоги", 16, 17, ()),
     ("paragraph", None, "Текст после заголовка.", 18, 18, ("Итоги",)),
     ("heading", 2, "Приложение", 20, 20, ("Итоги",)),
@@ -75,10 +75,10 @@ def test_paragraphs_headings_and_lists(tmp_path: Path) -> None:
 
 
 def test_numbered_sentence_is_not_a_heading(tmp_path: Path) -> None:
-    blocks = _load(tmp_path, "1. Проверить пользовательскую сессию.\n".encode())
+    blocks = _load(tmp_path, "1. Проверить срок действия ключа.\n".encode())
 
     assert [(b.kind, b.text) for b in blocks] == [
-        ("list_item", "1. Проверить пользовательскую сессию.")
+        ("list_item", "1. Проверить срок действия ключа.")
     ]
 
 
@@ -94,7 +94,7 @@ def test_word_symbol_bullet_starts_list_item(tmp_path: Path) -> None:
 
 
 def test_status_code_line_is_paragraph_not_list_item(tmp_path: Path) -> None:
-    blocks = _load(tmp_path, "200. Ответ в случае успешного выполнения метода.\n".encode())
+    blocks = _load(tmp_path, "200. Запрос обработан без ошибок.\n".encode())
 
     assert blocks[0].kind == "paragraph"
 
