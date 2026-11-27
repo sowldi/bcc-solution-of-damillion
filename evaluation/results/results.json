@@ -1,7 +1,7 @@
 {
   "meta": {
-    "date": "2026-11-27 17:58 UTC",
-    "commit": "b2a6f7d-dirty",
+    "date": "2026-11-27 20:52 UTC",
+    "commit": "3f986bb",
     "python": "3.12.10",
     "platform": "Windows-11-10.0.26200-SP0",
     "processor": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD",
@@ -1631,6 +1631,7 @@
       "fn": 0,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1643,6 +1644,7 @@
       "fn": 0,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1655,6 +1657,7 @@
       "fn": 0,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1667,6 +1670,10 @@
       "fn": 2,
       "fp": 0,
       "same_findings_as_md": false,
+      "diff_rules": [
+        "CMP-03",
+        "CON-03"
+      ],
       "verdict": "not_recommended"
     },
     {
@@ -1679,6 +1686,7 @@
       "fn": 0,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1691,6 +1699,9 @@
       "fn": 0,
       "fp": 0,
       "same_findings_as_md": false,
+      "diff_rules": [
+        "CMP-05"
+      ],
       "verdict": "not_recommended"
     },
     {
@@ -1703,6 +1714,9 @@
       "fn": 0,
       "fp": 0,
       "same_findings_as_md": false,
+      "diff_rules": [
+        "CMP-05"
+      ],
       "verdict": "not_recommended"
     },
     {
@@ -1715,6 +1729,9 @@
       "fn": 1,
       "fp": 0,
       "same_findings_as_md": false,
+      "diff_rules": [
+        "CMP-05"
+      ],
       "verdict": "not_recommended"
     },
     {
@@ -1727,6 +1744,7 @@
       "fn": 2,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1739,6 +1757,7 @@
       "fn": 2,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1751,6 +1770,7 @@
       "fn": 2,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1763,6 +1783,10 @@
       "fn": 4,
       "fp": 0,
       "same_findings_as_md": false,
+      "diff_rules": [
+        "CMP-03",
+        "CON-03"
+      ],
       "verdict": "not_recommended"
     },
     {
@@ -1775,6 +1799,7 @@
       "fn": 1,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1787,6 +1812,7 @@
       "fn": 1,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1799,6 +1825,7 @@
       "fn": 1,
       "fp": 0,
       "same_findings_as_md": true,
+      "diff_rules": [],
       "verdict": "not_recommended"
     },
     {
@@ -1811,6 +1838,10 @@
       "fn": 3,
       "fp": 0,
       "same_findings_as_md": false,
+      "diff_rules": [
+        "CMP-03",
+        "CON-03"
+      ],
       "verdict": "not_recommended"
     }
   ],
@@ -1820,6 +1851,9 @@
       "repeat_identical": true,
       "hash_seeds_identical": true,
       "permutation_same_findings": false,
+      "permutation_diff_rules": [
+        "ACC-01"
+      ],
       "permutation_same_verdict": true
     },
     {
@@ -1827,6 +1861,9 @@
       "repeat_identical": true,
       "hash_seeds_identical": true,
       "permutation_same_findings": false,
+      "permutation_diff_rules": [
+        "CMP-04"
+      ],
       "permutation_same_verdict": true
     },
     {
@@ -1834,6 +1871,7 @@
       "repeat_identical": true,
       "hash_seeds_identical": true,
       "permutation_same_findings": true,
+      "permutation_diff_rules": [],
       "permutation_same_verdict": true
     },
     {
@@ -1841,6 +1879,9 @@
       "repeat_identical": true,
       "hash_seeds_identical": true,
       "permutation_same_findings": false,
+      "permutation_diff_rules": [
+        "ACC-01"
+      ],
       "permutation_same_verdict": true
     }
   ],
@@ -1848,10 +1889,10 @@
     {
       "requirements": 50,
       "adversarial": false,
-      "seconds_total": 0.06,
+      "seconds_total": 0.1,
       "seconds_by_stage": {
         "чтение": 0.01,
-        "сегментация": 0.04,
+        "сегментация": 0.06,
         "правила": 0.01,
         "граф": 0.01,
         "этап 8": 0.0,
@@ -1864,12 +1905,12 @@
     {
       "requirements": 200,
       "adversarial": false,
-      "seconds_total": 0.68,
+      "seconds_total": 1.17,
       "seconds_by_stage": {
-        "чтение": 0.02,
-        "сегментация": 0.59,
-        "правила": 0.04,
-        "граф": 0.02,
+        "чтение": 0.03,
+        "сегментация": 1.0,
+        "правила": 0.08,
+        "граф": 0.05,
         "этап 8": 0.01,
         "оценка": 0.0
       },
@@ -1878,20 +1919,52 @@
       "candidates_found": 3
     },
     {
-      "requirements": 200,
-      "adversarial": true,
-      "seconds_total": 0.76,
+      "requirements": 1000,
+      "adversarial": false,
+      "seconds_total": 21.67,
       "seconds_by_stage": {
-        "чтение": 0.02,
-        "сегментация": 0.66,
-        "правила": 0.04,
-        "граф": 0.03,
-        "этап 8": 0.01,
-        "оценка": 0.0
+        "чтение": 0.08,
+        "сегментация": 20.88,
+        "правила": 0.47,
+        "граф": 0.19,
+        "этап 8": 0.04,
+        "оценка": 0.01
       },
-      "peak_mb": 1.4,
+      "peak_mb": 5.2,
+      "candidates": 93,
+      "candidates_found": 93
+    },
+    {
+      "requirements": 2000,
+      "adversarial": false,
+      "seconds_total": 80.97,
+      "seconds_by_stage": {
+        "чтение": 0.18,
+        "сегментация": 79.66,
+        "правила": 0.73,
+        "граф": 0.31,
+        "этап 8": 0.07,
+        "оценка": 0.01
+      },
+      "peak_mb": 9.4,
+      "candidates": 343,
+      "candidates_found": 343
+    },
+    {
+      "requirements": 2000,
+      "adversarial": true,
+      "seconds_total": 107.64,
+      "seconds_by_stage": {
+        "чтение": 0.21,
+        "сегментация": 104.97,
+        "правила": 1.03,
+        "граф": 1.33,
+        "этап 8": 0.1,
+        "оценка": 0.01
+      },
+      "peak_mb": 10.0,
       "candidates": 1000,
-      "candidates_found": 4853
+      "candidates_found": 498739
     }
   ],
   "api": [
@@ -1945,7 +2018,15 @@
       "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: ключ не принят или нет доступа. До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных требов"
     }
   ],
-  "official": null,
+  "official": {
+    "sha256_prefix": "e7dae55e5453",
+    "requirements": 59,
+    "confirmed_defects": 5,
+    "major_defects": 2,
+    "confirmed_contradictions": 0,
+    "candidates": 93,
+    "verdict": "not_recommended"
+  },
   "llm": {
     "measured": false,
     "reason": "модель не вызывалась: нет ключа и разрешения"
