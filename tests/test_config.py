@@ -97,6 +97,9 @@ def test_ollama_needs_no_api_key(tmp_path: Path) -> None:
         ("LLM_TEMPERATURE=3", "LLM_TEMPERATURE"),
         ("LLM_TIMEOUT_SECONDS=-1", "LLM_TIMEOUT_SECONDS"),
         ("LLM_MAX_RETRIES=-2", "LLM_MAX_RETRIES"),
+        ("LLM_MAX_OUTPUT_TOKENS=10", "LLM_MAX_OUTPUT_TOKENS"),
+        ("LLM_MAX_REQUESTS=0", "LLM_MAX_REQUESTS"),
+        ("LLM_MAX_REQUESTS=1000", "LLM_MAX_REQUESTS"),
     ],
 )
 def test_invalid_values_name_the_variable(tmp_path: Path, line: str, variable: str) -> None:
@@ -114,3 +117,29 @@ def test_model_required_for_provider_without_default(tmp_path: Path) -> None:
         load_settings(env_file=tmp_path / "missing.env", provider_override="openai")
 
     assert "OPENAI_MODEL" in str(exc.value)
+
+
+def test_llm_limits_have_safe_defaults(tmp_path: Path) -> None:
+    settings = load_settings(env_file=tmp_path / "missing.env")
+
+    assert settings.max_output_tokens == 4096
+    assert settings.max_requests == 10
+    assert settings.base_url is None
+
+
+def test_llm_limits_and_endpoint_are_configurable(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "LLM_MAX_OUTPUT_TOKENS=2048\nLLM_MAX_REQUESTS=3\nLLM_BASE_URL=https://proxy.test/v1\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(env_file=env_file)
+
+    assert (settings.max_output_tokens, settings.max_requests) == (2048, 3)
+    assert settings.base_url == "https://proxy.test/v1"
+
+
+def test_missing_key_message_mentions_rules_only(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="--rules-only"):
+        load_settings(env_file=tmp_path / "missing.env").require_api_key()

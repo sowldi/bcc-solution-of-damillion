@@ -32,6 +32,10 @@ class ConfigError(ValidatorError):
 
 
 class ProviderError(ValidatorError):
-    """Сбой обращения к LLM-провайдеру."""
+    """Сбой обращения к LLM-провайдеру.
+
+    transient — временная ошибка (таймаут, сеть, 429, 5xx): запрос можно повторить.
+    """
 
     exit_code = EXIT_PROVIDER_ERROR
+    transient: bool = False

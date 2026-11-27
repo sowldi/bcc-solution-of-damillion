@@ -66,6 +66,9 @@ class Settings:
     timeout_seconds: float
     max_retries: int
     rpm: int
+    max_output_tokens: int = 4096  # лимит длины ответа модели
+    max_requests: int = 10  # не больше запросов к модели за один прогон
+    base_url: str | None = None  # свой адрес сервиса (прокси, совместимый API); иначе стандартный
 
     @property
     def key_variable(self) -> str | None:
@@ -80,7 +83,8 @@ class Settings:
         if self.api_key is None:
             raise ConfigError(
                 f"Не задан {variable}. Скопируйте .env.example в .env в папке запуска "
-                f"и впишите ключ в строку {variable}=..."
+                f"и впишите ключ в строку {variable}=... Без LLM документ можно проверить "
+                "только детерминированными правилами: параметр --rules-only."
             )
         return self.api_key
 
@@ -157,4 +161,11 @@ def load_settings(
         ),
         max_retries=_parse_int(get("LLM_MAX_RETRIES"), "LLM_MAX_RETRIES", 4, minimum=0, maximum=20),
         rpm=_parse_int(get("LLM_RPM"), "LLM_RPM", 10, minimum=1, maximum=10_000),
+        max_output_tokens=_parse_int(
+            get("LLM_MAX_OUTPUT_TOKENS"), "LLM_MAX_OUTPUT_TOKENS", 4096, minimum=256, maximum=65_536
+        ),
+        max_requests=_parse_int(
+            get("LLM_MAX_REQUESTS"), "LLM_MAX_REQUESTS", 10, minimum=1, maximum=100
+        ),
+        base_url=get("LLM_BASE_URL"),
     )

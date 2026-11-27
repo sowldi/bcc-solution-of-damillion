@@ -1,22 +1,34 @@
 """Markdown-отчёт на русском.
 
-Этап 3: паспорт прогона, сводка извлечения текста, нарезка требований и детерминированная
-проверка (замечания правил, прошедшие проверку доказательств). LLM-анализ добавляется далее.
+Этап 4: паспорт прогона, сводка извлечения текста, нарезка требований, детерминированная
+проверка (замечания правил, прошедшие проверку доказательств) и гипотезы LLM — отдельным
+разделом и со статусом «не подтверждено»: с замечаниями правил они не смешиваются.
 """
 
 from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from validator.criteria import criterion
-from validator.findings import SEVERITIES, SEVERITY_TITLES, Evidence, Finding, Severity
+from validator.findings import (
+    RULE_CATEGORY_TITLES,
+    SEVERITIES,
+    SEVERITY_TITLES,
+    Evidence,
+    Finding,
+    Severity,
+)
 from validator.ingest.common import one_line
 from validator.lint import LintResult
 from validator.model import FORMAT_TITLES, Document
 from validator.passport import RunPassport
 from validator.segmentation import CATEGORY_TITLES, Requirement, Segmentation
 from validator.segmentation.text import parse_prefix
+
+if TYPE_CHECKING:  # отчёт не загружает LLM-слой: в режиме --rules-only его нет
+    from validator.llm import LLMAnalysis
 
 _BRIEF_LIMIT = 140
 _SEVERITY_GROUPS: dict[Severity, str] = {
@@ -270,11 +282,67 @@ def _lint_section(lint: LintResult, segmentation: Segmentation | None) -> str:
     return "\n\n".join(parts)
 
 
+def _hypothesis_block(number: int, finding: Finding) -> str:
+    item = criterion(finding.criterion)
+    evidence = finding.evidence[0]
+    return "\n".join(
+        [
+            f"**5.{number}. {RULE_CATEGORY_TITLES[finding.category]} · {_escape(finding.title)}**",
+            "",
+            f"- Требование: `{evidence.requirement_id}`",
+            f"- Цитата: {_quote(evidence.quote)} — {_where(evidence)}",
+            f"- Предполагаемая важность: {SEVERITY_TITLES[finding.severity]}",
+            f"- Объяснение модели: {_escape(finding.explanation)}",
+            f"- Рекомендация модели: {_escape(finding.recommendation)}",
+            f"- Критерий: {item.reference} — {item.title}",
+            "- Статус: не подтверждено",
+        ]
+    )
+
+
+def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | None:
+    if analysis is None:
+        if passport.mode == "rules-only":
+            return "## 5. Анализ LLM\n\nLLM не использовался (режим --rules-only)."
+        return None
+    coverage = (
+        f"Провайдер: {analysis.provider}, модель: {analysis.model}, версия промпта: "
+        f"{analysis.prompt_version}. Запросов: {analysis.requests}; отправлено требований: "
+        f"{analysis.requirements_sent} из {analysis.requirements_total}."
+    )
+    if analysis.truncated:
+        coverage += " Остальные требования не отправлены: сработал лимит LLM_MAX_REQUESTS."
+    parts = [
+        "## 5. Анализ LLM (гипотезы, не подтверждены)",
+        coverage,
+        "> Гипотезы LLM не являются замечаниями: модель только предполагает дефект. Ниже — "
+        "гипотезы, цитата которых дословно найдена в тексте требования; сам дефект не "
+        "проверен. Проверка доказательств для гипотез LLM появится на этапе 5.",
+    ]
+    if not analysis.hypotheses:
+        parts.append("Модель не предложила гипотез.")
+    parts += [
+        _hypothesis_block(number, finding) for number, finding in enumerate(analysis.hypotheses, 1)
+    ]
+    if analysis.rejected:
+        parts += [
+            f"### Отклонённые ответы модели ({len(analysis.rejected)})",
+            "\n".join(
+                f"- элемент ответа № {item.index + 1}"
+                + (f" (`{item.requirement_id}`)" if item.requirement_id else "")
+                + f": {_escape(' '.join(item.reasons))}"
+                for item in analysis.rejected
+            ),
+        ]
+    return "\n\n".join(parts)
+
+
 def render_report(
     passport: RunPassport,
     document: Document,
     segmentation: Segmentation | None = None,
     lint: LintResult | None = None,
+    llm: LLMAnalysis | None = None,
 ) -> str:
     sections = [
         f"# Отчёт о проверке требований: {_cell(passport.document_name)}",
@@ -285,8 +353,11 @@ def render_report(
         sections.append(_segmentation_section(segmentation))
     if lint is not None:
         sections.append(_lint_section(lint, segmentation))
+    llm_section = _llm_section(passport, llm)
+    if llm_section is not None:
+        sections.append(llm_section)
     sections.append(
-        "> Агент на этапе 3: детерминированные правила и проверка доказательств подключены; "
-        "LLM-анализ ещё не подключён."
+        "> Агент на этапе 4: детерминированные правила с проверкой доказательств и гипотезы LLM "
+        "без подтверждения; проверка доказательств для гипотез LLM — этап 5."
     )
     return "\n\n".join(sections) + "\n"

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import socket
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,21 +17,71 @@ from tests.builders import (
     write_sample_pdf,
     write_text,
 )
-from tests.conftest import RunCli
+from tests.conftest import AGENT_ENV_VARS, PROJECT_ROOT, RunCli
+from tests.llm_helpers import (
+    FAKE_KEY,
+    StubServer,
+    findings_json,
+    hypothesis,
+    json_reply,
+    ollama_reply,
+    stub_server,
+)
 from validator.cli import main
-from validator.errors import EXIT_CONFIG_ERROR, EXIT_INPUT_ERROR, EXIT_OK
+from validator.errors import (
+    EXIT_CONFIG_ERROR,
+    EXIT_INPUT_ERROR,
+    EXIT_OK,
+    EXIT_PROVIDER_ERROR,
+)
+from validator.llm.fake import FakeProvider
+
+
+@pytest.fixture
+def offline_llm(monkeypatch: pytest.MonkeyPatch) -> list[FakeProvider]:
+    """Стандартный режим без сети: фабрика провайдеров отдаёт FakeProvider."""
+    created: list[FakeProvider] = []
+
+    def factory(settings: object, **_: object) -> FakeProvider:
+        created.append(FakeProvider('{"findings": []}'))
+        return created[-1]
+
+    monkeypatch.setattr("validator.llm.create_provider", factory)
+    return created
+
+
+def _ollama_env(server: StubServer, **extra: str) -> dict[str, str]:
+    """Настройки для настоящего HTTP-вызова к локальной заглушке, имитирующей Ollama."""
+    return {
+        "LLM_PROVIDER": "ollama",
+        "OLLAMA_BASE_URL": server.url,
+        "OLLAMA_MODEL": "test-model",
+        "LLM_MAX_RETRIES": "0",
+        **extra,
+    }
 
 
 def test_end_to_end_command_writes_report(run_cli: RunCli, sample_md: Path, tmp_path: Path) -> None:
     report = tmp_path / "reports" / "report.md"
+    reply = ollama_reply(findings_json(hypothesis("R-1", "хранит заказ")))
 
-    result = run_cli(str(sample_md), str(report))
+    with stub_server(reply) as server:
+        result = run_cli(str(sample_md), str(report), extra_env=_ollama_env(server))
 
     assert result.returncode == EXIT_OK, result.stderr
     assert report.is_file()
     assert str(report) in result.stdout
+    [received] = server.received
+    assert received.path == "/api/chat"
+    text = report.read_text(encoding="utf-8")
+    assert "| Модель | ollama / test-model |" in text
+    assert "## 5. Анализ LLM (гипотезы, не подтверждены)" in text
+    assert "«хранит заказ»" in text
+    assert "не подтверждено" in text
+    assert "Гипотез LLM: 1 (не подтверждены)" in result.stdout
 
 
+@pytest.mark.usefixtures("offline_llm")
 def test_report_contains_run_passport(sample_md: Path, tmp_path: Path) -> None:
     report = tmp_path / "out" / "report.md"
 
@@ -43,6 +96,7 @@ def test_report_contains_run_passport(sample_md: Path, tmp_path: Path) -> None:
     assert "Дата" in text
 
 
+@pytest.mark.usefixtures("offline_llm")
 def test_creates_missing_output_directories(sample_md: Path, tmp_path: Path) -> None:
     report = tmp_path / "a" / "b" / "c" / "report.md"
 
@@ -113,6 +167,7 @@ def test_cli_without_arguments_shows_usage(run_cli: RunCli) -> None:
     assert "usage" in result.stderr.lower() or "использование" in result.stderr.lower()
 
 
+@pytest.mark.usefixtures("offline_llm")
 def test_utf8_bom_document_is_read(tmp_path: Path) -> None:
     src = tmp_path / "bom.md"
     src.write_bytes("﻿# Документ\n\nТекст требования.\n".encode())
@@ -137,8 +192,10 @@ def test_command_reads_every_supported_format(
 ) -> None:
     source = writer(tmp_path / name, SAMPLE)
     report = tmp_path / "out" / f"{name}.report.md"
+    reply = ollama_reply(findings_json(hypothesis("R-1", "хранит настройку порога")))
 
-    result = run_cli(str(source), str(report))
+    with stub_server(reply) as server:
+        result = run_cli(str(source), str(report), extra_env=_ollama_env(server))
 
     assert result.returncode == EXIT_OK, result.stderr
     text = report.read_text(encoding="utf-8")
@@ -146,8 +203,11 @@ def test_command_reads_every_supported_format(
     assert f"| Формат | {title} |" in text
     assert "## 3. Нарезка требований" in text
     assert "| R-1 | R-1 |" in text
+    assert "## 4. Детерминированная проверка" in text
+    assert "«хранит настройку порога»" in text
 
 
+@pytest.mark.usefixtures("offline_llm")
 def test_reading_warnings_are_printed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     src = tmp_path / "legacy.txt"
     src.write_bytes("Текст в старой кодировке.\n".encode("cp1251"))
@@ -240,7 +300,7 @@ def test_rules_only_input_errors_keep_exit_codes(tmp_path: Path) -> None:
     assert main([str(empty), str(tmp_path / "r.md"), "--rules-only"]) == EXIT_INPUT_ERROR
 
 
-def test_standard_mode_also_runs_deterministic_rules(tmp_path: Path) -> None:
+def test_standard_mode_runs_rules_and_llm(tmp_path: Path, offline_llm: list[FakeProvider]) -> None:
     report = tmp_path / "report.md"
 
     assert main([str(_spec(tmp_path)), str(report)]) == EXIT_OK
@@ -248,7 +308,10 @@ def test_standard_mode_also_runs_deterministic_rules(tmp_path: Path) -> None:
     text = report.read_text(encoding="utf-8")
     assert "## 4. Детерминированная проверка" in text
     assert "| Режим | стандартный |" in text
-    assert "не вызывалась (настроено: gemini" in text
+    assert "| Модель | fake / fake-model |" in text
+    assert "## 5. Анализ LLM" in text
+    [provider] = offline_llm
+    assert len(provider.requests) == 1
 
 
 @pytest.mark.parametrize(
@@ -273,3 +336,97 @@ def test_rules_only_command_reads_every_supported_format(
     text = report.read_text(encoding="utf-8")
     assert "## 4. Детерминированная проверка" in text
     assert "Замечаний:" in result.stdout
+
+
+# --- стандартный режим: LLM-слой ---------------------------------------------------------
+
+
+def test_rules_only_does_not_import_llm_layer(run_cli: RunCli, tmp_path: Path) -> None:
+    spec = _spec(tmp_path)
+    script = (
+        "import sys; from validator.cli import main; "
+        f"code = main([{str(spec)!r}, {str(tmp_path / 'r.md')!r}, '--rules-only']); "
+        "print('llm загружен' if 'validator.llm' in sys.modules else 'llm не загружен'); "
+        "sys.exit(code)"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in AGENT_ENV_VARS}
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8", "-c", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+
+    assert result.returncode == EXIT_OK, result.stderr
+    assert "llm не загружен" in result.stdout
+
+
+def test_standard_mode_without_key_stops_with_config_error(run_cli: RunCli, tmp_path: Path) -> None:
+    report = tmp_path / "report.md"
+
+    result = run_cli(str(_spec(tmp_path)), str(report))
+
+    assert result.returncode == EXIT_CONFIG_ERROR
+    assert "GEMINI_API_KEY" in result.stderr
+    assert "--rules-only" in result.stderr
+    assert not report.exists()
+
+
+def test_provider_failure_is_reported_not_masked(run_cli: RunCli, tmp_path: Path) -> None:
+    report = tmp_path / "report.md"
+
+    with stub_server(json_reply(503, {"error": "overloaded"})) as server:
+        result = run_cli(str(_spec(tmp_path)), str(report), extra_env=_ollama_env(server))
+
+    assert result.returncode == EXIT_PROVIDER_ERROR
+    assert "503" in result.stderr
+    assert "--rules-only" in result.stderr
+    assert not report.exists()
+
+
+def test_invalid_model_answer_is_reported_not_masked(run_cli: RunCli, tmp_path: Path) -> None:
+    report = tmp_path / "report.md"
+
+    with stub_server(ollama_reply("Я не могу ответить в JSON.")) as server:
+        result = run_cli(str(_spec(tmp_path)), str(report), extra_env=_ollama_env(server))
+
+    assert result.returncode == EXIT_PROVIDER_ERROR
+    assert "JSON" in result.stderr
+    assert not report.exists()
+
+
+def test_rejected_key_never_appears_in_output(run_cli: RunCli, tmp_path: Path) -> None:
+    report = tmp_path / "report.md"
+    denied = json_reply(401, {"error": {"message": f"invalid key {FAKE_KEY}"}})
+
+    with stub_server(denied) as server:
+        env = {
+            "LLM_PROVIDER": "openai",
+            "OPENAI_API_KEY": FAKE_KEY,
+            "OPENAI_MODEL": "test-model",
+            "LLM_BASE_URL": f"{server.url}/v1",
+            "LLM_MAX_RETRIES": "3",
+        }
+        result = run_cli(str(_spec(tmp_path)), str(report), extra_env=env)
+
+    assert result.returncode == EXIT_PROVIDER_ERROR
+    assert len(server.received) == 1  # авторизация не повторяется
+    assert server.received[0].headers["Authorization"] == f"Bearer {FAKE_KEY}"
+    assert FAKE_KEY not in result.stderr + result.stdout
+    assert "OPENAI_API_KEY" in result.stderr
+
+
+def test_unknown_model_is_configuration_error(run_cli: RunCli, tmp_path: Path) -> None:
+    missing = json_reply(404, {"error": "model 'test-model' not found"})
+
+    with stub_server(missing) as server:
+        result = run_cli(
+            str(_spec(tmp_path)), str(tmp_path / "r.md"), extra_env=_ollama_env(server)
+        )
+
+    assert result.returncode == EXIT_CONFIG_ERROR
+    assert "OLLAMA_MODEL" in result.stderr

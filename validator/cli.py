@@ -6,17 +6,30 @@ import argparse
 import sys
 import traceback
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from validator import __version__
-from validator.config import PROVIDERS, load_settings
-from validator.errors import EXIT_INTERNAL_ERROR, EXIT_OK, InputError, ValidatorError
+from validator.config import PROVIDERS, Settings, load_settings
+from validator.errors import (
+    EXIT_INTERNAL_ERROR,
+    EXIT_OK,
+    InputError,
+    ProviderError,
+    ValidatorError,
+)
 from validator.ingest import SUPPORTED_SUFFIXES, load_document
 from validator.lint import run_lint
+from validator.model import Document
 from validator.passport import build_passport
 from validator.report import render_report, write_text_atomic
-from validator.segmentation import segment_document
+from validator.segmentation import Segmentation, segment_document
+
+if TYPE_CHECKING:  # LLM-слой импортируется лениво — только в стандартном режиме
+    from validator.llm import LLMAnalysis
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -65,16 +78,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Предупреждение: {warning}", file=sys.stderr)
         segmentation = segment_document(document)
         lint = run_lint(document, segmentation)
+        analysis = None if settings is None else _run_llm(settings, document, segmentation)
         passport = build_passport(
             document,
             settings,
-            llm_used=False,
+            llm_used=analysis is not None,
             started_at=started_at,
             mode="rules-only" if args.rules_only else "standard",
         )
-        write_text_atomic(args.output, render_report(passport, document, segmentation, lint))
+        if analysis is not None:  # в паспорте — провайдер, который действительно отвечал
+            passport = replace(passport, provider=analysis.provider, model=analysis.model)
+        report = render_report(passport, document, segmentation, lint, analysis)
+        write_text_atomic(args.output, report)
     except ValidatorError as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
+        if isinstance(exc, ProviderError):
+            print(
+                "Отчёт не записан: анализ LLM не выполнен. Проверить документ только "
+                "детерминированными правилами можно с параметром --rules-only.",
+                file=sys.stderr,
+            )
         return exc.exit_code
     except OSError as exc:
         print(f"Ошибка записи отчёта {args.output}: {exc.strerror or exc}", file=sys.stderr)
@@ -87,6 +110,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"Замечаний: {len(lint.findings)} "
         f"(отклонено проверкой доказательств: {len(lint.rejected)})."
     )
+    if analysis is not None:
+        print(
+            f"Гипотез LLM: {len(analysis.hypotheses)} (не подтверждены), "
+            f"отклонено при разборе ответа: {len(analysis.rejected)}."
+        )
     if lint.rejected:
         print(
             f"Предупреждение: {len(lint.rejected)} замечаний правил не прошли проверку "
@@ -95,6 +123,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     print(f"Отчёт записан: {args.output}")
     return EXIT_OK
+
+
+def _run_llm(settings: Settings, document: Document, segmentation: Segmentation) -> LLMAnalysis:
+    # Ленивый импорт: в режиме --rules-only LLM-слой не загружается вовсе.
+    from validator import llm
+
+    provider = llm.create_provider(settings)
+    host = urlsplit(provider.endpoint).netloc or provider.endpoint
+    print(
+        f"LLM: требования ({len(segmentation.atomic_requirements)}) отправляются провайдеру "
+        f"{provider.name} ({provider.model}, {host}).",
+        file=sys.stderr,
+    )
+    options = llm.LLMOptions.from_settings(settings)
+    return llm.analyze_with_llm(document, segmentation, provider, options)
 
 
 def _force_utf8_console() -> None:

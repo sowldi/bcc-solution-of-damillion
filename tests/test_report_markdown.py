@@ -6,8 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.llm_helpers import findings_json, hypothesis
 from validator.ingest import load_document
 from validator.lint import LintResult, run_lint
+from validator.llm import LLMOptions, analyze_with_llm
+from validator.llm.fake import FakeProvider
 from validator.model import Block, Document, Location
 from validator.passport import RunPassport
 from validator.report import render_report
@@ -252,4 +255,59 @@ def test_report_footer_names_current_stage(tmp_path: Path) -> None:
 
     text = render_report(_passport(NOON), document, segmentation, lint)
 
-    assert text.rstrip().endswith("LLM-анализ ещё не подключён.")
+    assert "> Агент на этапе 4:" in text
+    assert text.rstrip().endswith("проверка доказательств для гипотез LLM — этап 5.")
+
+
+# --- раздел 5: гипотезы LLM ---------------------------------------------------------------
+
+LLM_SPEC = (
+    "# Сервис\n\n## Функциональные требования\n\n"
+    "* Ф-1. Библиотекарь подтверждает бронь в течение рабочего дня.\n"
+)
+
+
+def _with_llm(tmp_path: Path, reply: str) -> str:
+    document, segmentation, lint = _linted(tmp_path, LLM_SPEC)
+    analysis = analyze_with_llm(
+        document, segmentation, FakeProvider(reply), LLMOptions(max_retries=0)
+    )
+    passport = replace(_passport(NOON), llm_used=True, provider="fake", model="fake-model")
+    return render_report(passport, document, segmentation, lint, analysis)
+
+
+def test_llm_section_marks_hypotheses_unverified(tmp_path: Path) -> None:
+    reply = findings_json(
+        hypothesis("Ф-1", "в течение рабочего дня"), hypothesis("Ф-1", "нет такой цитаты")
+    )
+
+    text = _with_llm(tmp_path, reply)
+
+    section = text.split("## 5. Анализ LLM (гипотезы, не подтверждены)")[1]
+    assert "| Модель | fake / fake-model |" in text
+    assert "Провайдер: fake, модель: fake-model" in section
+    assert "не являются замечаниями" in section
+    assert "**5.1. Однозначность · Неоднозначный срок**" in section
+    assert "- Требование: `Ф-1`" in section
+    assert "- Цитата: «в течение рабочего дня» — Сервис › Функциональные требования" in section
+    assert "- Статус: не подтверждено" in section
+    assert "### Отклонённые ответы модели (1)" in section
+    assert "цитата не найдена" in section
+    # гипотезы LLM не смешиваются с подтверждёнными замечаниями правил
+    assert "LLM" not in text.split("## 4.")[1].split("## 5.")[0]
+
+
+def test_llm_section_without_hypotheses(tmp_path: Path) -> None:
+    text = _with_llm(tmp_path, '{"findings": []}')
+
+    assert "Модель не предложила гипотез." in text
+
+
+def test_rules_only_report_says_llm_was_not_used(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(tmp_path, LLM_SPEC)
+    passport = replace(_passport(NOON), provider=None, model=None, mode="rules-only")
+
+    text = render_report(passport, document, segmentation, lint)
+
+    assert "## 5. Анализ LLM" in text
+    assert "LLM не использовался (режим --rules-only)." in text
