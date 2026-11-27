@@ -164,6 +164,22 @@ _SELF_REFERENCE = re.compile(
     r"(?:(?:настоящ(?:ий|ем|его)|данн(?:ый|ом|ого)|этот|этом|дочерн(?:ий|ем|его)"
     r"|родительск(?:ий|ом|ого))\s+)?документ(?:е|а|ы|ов)?\b"
 )
+# Вводная фраза раздела описывает документ, а не систему: «В этом разделе описаны…»,
+# «Ниже перечислены…», «Данный раздел описывает…». Совпадение — только целой конструкцией
+# в начале фрагмента («Ниже порога…», «Далее система…» сюда не попадают).
+_SECTION_INTRO = re.compile(
+    r"(?:"
+    r"(?:в|во) (?:этом|данном|настоящем|следующем) "
+    r"(?:разделе|подразделе|пункте|параграфе|главе|документе)\b"
+    r"|(?:ниже|далее|выше) "
+    r"(?:перечислены|приведены|описаны|представлены|указаны|рассмотрены|изложены)\b"
+    r"|(?:этот|данный|настоящий|следующий) (?:раздел|подраздел|пункт|параграф)\b"
+    r"|(?:эта|данная|настоящая|следующая) глава\b"
+    r"|(?:раздел|подраздел|глава) (?:содержит|описывает|включает|посвящ)"
+    r"|(?:this|the following) (?:section|chapter|subsection)\b"
+    r"|(?:below|the following) (?:are|is) (?:listed|described)\b"
+    r")"
+)
 _SUBJECT_START = re.compile(
     r"(?:система|сервис|приложение|модуль|компонент|платформа|api|метод|контроллер"
     r"|пользователь|клиент|оператор|администратор|держатель|банк|процессинг)\b"
@@ -187,6 +203,12 @@ _EMPTY_VALUES = frozenset({"", "—", "-", "–", "tbd", "n/a", "?"})
 _CODE_START = re.compile(
     r"(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+/|(?:curl|wget)\s|<[A-Za-z?!/]"
 )
+# Строка JSON-объекта: «"ключ": значение», где значение начинается как значение JSON
+# (а не как слово: «"Порог": целое число…» — это текст).
+_JSON_MEMBER = re.compile(r'"[^"\n]{1,200}"\s*:\s*(?:["{\[\-\d]|true\b|false\b|null\b)')
+_BRACKETS_ONLY = re.compile(r"[\[\]{}(),\s]+")  # «{», «},», «]» — строки структуры JSON
+# Отдельное значение JSON («"push",», «1,», «true»): кодом считается только рядом с кодом.
+_JSON_VALUE = re.compile(r'(?:"[^"\n]*"|-?\d+(?:[.,]\d+)?|true|false|null)\s*,?')
 # Ячейка-вариант выбора: короткие варианты через «/» («Да / Нет / Не требуется», «Dev / Prod»).
 _CHOICE_CELL = re.compile(r"[\w ]{1,20}(?:/[\w ]{1,20})+")
 _METADATA_KEYS = (
@@ -317,6 +339,8 @@ def classify(block: Block, prefix: Prefix) -> Classification:
         )
     if _SELF_REFERENCE.match(lowered):
         return Classification("reference", category, "high", (*base, "self_reference"))
+    if block.kind != "table_row" and not prefix.doc_id and _SECTION_INTRO.match(lowered):
+        return Classification("reference", category, "high", (*base, "section_intro"))
     if block.kind != "table_row" and not prefix.doc_id and len(words(body)) < 2:
         return Classification("reference", category, "medium", (*base, "short"), (W_SHORT,))
     if lowered.startswith(EXAMPLE_MARKERS):
@@ -378,12 +402,24 @@ def _classify_content(
 
 
 def _looks_like_code(text: str) -> bool:
-    """Технический фрагмент без разметки кода (DOCX, PDF, TXT): JSON целиком, строка HTTP-запроса,
-    команда curl/wget, XML/HTML-разметка."""
+    """Технический фрагмент без разметки кода (DOCX, PDF, TXT): JSON целиком или построчно
+    («{», «"ключ": значение», «},»), строка HTTP-запроса, команда curl/wget, XML/HTML."""
     stripped = text.strip()
+    if not stripped:
+        return False
     if (stripped[:1], stripped[-1:]) in (("{", "}"), ("[", "]")):
         return True
+    if _BRACKETS_ONLY.fullmatch(stripped) or _JSON_MEMBER.match(stripped):
+        return True
+    if stripped[:1] in "{[" and _JSON_MEMBER.search(stripped):
+        return True
     return bool(_CODE_START.match(stripped))
+
+
+def looks_like_json_value(text: str) -> bool:
+    """Отдельное значение JSON в строке («"push",», «1,», «true») — кодом это становится
+    только в окружении кода (см. сегментатор), само по себе — нет."""
+    return bool(_JSON_VALUE.fullmatch(text.strip()))
 
 
 def _is_metadata_key(cell: str) -> bool:

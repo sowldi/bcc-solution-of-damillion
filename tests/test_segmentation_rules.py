@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import docx
 import pytest
 
 from tests.seg_helpers import segment_markdown, unit
+from validator.ingest import load_document
+from validator.segmentation import Segmentation, segment_document
 
 
 def test_functional_list_items_with_and_without_ids(tmp_path: Path) -> None:
@@ -251,6 +254,112 @@ def test_word_between_code_examples_is_not_glued_to_code(tmp_path: Path) -> None
         ("reference", "или"),
         ("code", '{"result": "ERROR"}'),
     ]
+
+
+@pytest.mark.parametrize(
+    "intro",
+    [
+        "В этом разделе описаны функциональные требования к сервису.",
+        "В данном разделе приведены правила бронирования.",
+        "Ниже перечислены основные сценарии работы.",
+        "Далее описаны требования к интерфейсу каталога.",
+        "Данный раздел описывает требования к выдаче книг.",
+        "Раздел содержит требования к уведомлениям.",
+        "This section describes the booking requirements.",
+    ],
+)
+def test_section_intro_is_reference_not_requirement(tmp_path: Path, intro: str) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        f"# Сервис\n\n## Функциональные требования\n\n{intro}\n\n* Система хранит бронь.\n",
+    )
+
+    fragment = unit(seg, intro[:15])
+
+    assert fragment.role == "reference"
+    assert "section_intro" in fragment.detection
+    assert unit(seg, "Система хранит бронь").role == "requirement"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Ниже порога уведомление не отправляется.",
+        "Далее система отправляет напоминание читателю.",
+        "В этом месяце читатель получает одно напоминание.",
+        "Раздел каталога открывается без авторизации.",
+    ],
+)
+def test_requirements_resembling_intro_stay_requirements(tmp_path: Path, text: str) -> None:
+    seg = segment_markdown(tmp_path, f"# Сервис\n\n## Функциональные требования\n\n{text}\n")
+
+    assert unit(seg, text[:15]).role == "requirement"
+
+
+def _docx_segmentation(tmp_path: Path, paragraphs: list[str]) -> Segmentation:
+    document = docx.Document()
+    document.add_heading("REST API", level=1)
+    for paragraph in paragraphs:
+        document.add_paragraph(paragraph)
+    path = tmp_path / "api.docx"
+    document.save(str(path))
+    return segment_document(load_document(path))
+
+
+def test_json_split_into_docx_paragraphs_is_code(tmp_path: Path) -> None:
+    """В Word пример JSON часто набран абзацем на строку — это не требования."""
+    lines = [
+        "{",
+        '  "result": "OK",',
+        '  "amount": 500,',
+        '  "items": [',
+        "    1,",
+        "    2",
+        "  ]",
+        "}",
+    ]
+
+    seg = _docx_segmentation(tmp_path, lines)
+    body = seg.fragments[1:]
+
+    assert [f.role for f in body] == ["code"] * len(lines)
+    assert [f.text for f in body] == [line.strip() for line in lines]  # текст не потерян
+    assert seg.requirements == ()
+
+
+def test_json_string_values_next_to_code_are_code(tmp_path: Path) -> None:
+    seg = _docx_segmentation(tmp_path, ["[", '"push",', '"sms"', "]"])
+
+    assert [f.role for f in seg.fragments[1:]] == ["code", "code", "code", "code"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '"Порог" задаётся читателем в настройках профиля.',
+        "Ответ содержит поле result со значением OK.",
+        "Список форматов задаётся в настройках: PDF, EPUB.",
+    ],
+)
+def test_prose_with_quotes_or_colons_is_not_code(tmp_path: Path, text: str) -> None:
+    seg = _docx_segmentation(tmp_path, [text])
+
+    assert seg.fragments[1].role == "requirement"
+
+
+def test_status_label_before_json_example_is_not_code(tmp_path: Path) -> None:
+    """Метка «404» перед примером ответа — не элемент JSON, хотя похожа на число."""
+    seg = _docx_segmentation(
+        tmp_path, ["Для чужой книги возвращается 404.", "404", '{"message": "Книга не найдена"}']
+    )
+
+    assert [f.role for f in seg.fragments[1:]] == ["requirement", "reference", "code"]
+
+
+def test_lonely_quoted_word_is_not_code_without_code_neighbours(tmp_path: Path) -> None:
+    seg = _docx_segmentation(tmp_path, ["Ответ содержит статус.", '"OK"'])
+
+    assert seg.fragments[2].role != "code"
 
 
 def test_explicit_id_outside_requirement_section_is_flagged(tmp_path: Path) -> None:

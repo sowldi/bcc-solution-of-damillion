@@ -219,6 +219,189 @@ def test_empty_document_model_gives_empty_segmentation() -> None:
     assert any("не обнаружены" in w for w in seg.warnings)
 
 
+# --- ID документа в заголовке («одно требование — один заголовок») ----------------
+
+HEADING_IDS = """# Сервис
+
+## Функциональные требования
+
+### FR-1 Создание брони
+
+Система должна позволять читателю забронировать книгу.
+
+### FR-2 Отмена брони
+
+Система отменяет бронь до выдачи книги. Отмена фиксируется в журнале.
+
+### Общие положения
+
+Сервис работает круглосуточно.
+
+## Связи
+
+Система отменяет бронь так же, как описано в FR-1.
+"""
+
+
+def test_heading_id_goes_to_requirement_not_heading(tmp_path: Path) -> None:
+    seg = segment_markdown(tmp_path, HEADING_IDS)
+    heading = unit(seg, "FR-1 Создание брони")
+    requirement = seg.by_id("FR-1")
+
+    assert heading.role == "heading"
+    assert heading.id.startswith("F-")
+    assert heading.doc_id is None
+    assert requirement.role == "requirement"
+    assert requirement.text == "Система должна позволять читателю забронировать книгу."
+    assert requirement.doc_id == "FR-1"
+    assert "doc_id:heading" in requirement.detection
+    # источник — абзац требования, а не заголовок
+    assert requirement.sources[0].location.line_start == 7
+
+
+def test_heading_id_reaches_statements_report_and_json(tmp_path: Path) -> None:
+    seg = segment_markdown(tmp_path, HEADING_IDS)
+    composite = seg.by_id("FR-2")
+
+    assert composite.children == ("FR-2/1", "FR-2/2")
+    assert {seg.by_id(c).doc_id for c in composite.children} == {"FR-2"}
+    assert Segmentation.from_json(seg.to_json()) == seg
+    assert unit(seg, "Сервис работает").doc_id is None
+
+
+def test_reference_to_heading_id_resolves_to_requirement(tmp_path: Path) -> None:
+    seg = segment_markdown(tmp_path, HEADING_IDS)
+    referring = unit(seg, "Система отменяет бронь так же")
+
+    assert "req:FR-1" in referring.references
+    assert seg.by_id("FR-1").role == "requirement"
+
+
+def test_heading_id_makes_text_a_requirement_outside_requirement_sections(
+    tmp_path: Path,
+) -> None:
+    seg = segment_markdown(
+        tmp_path, "# Каталог\n\n### FR-7 Поиск книги\n\nСистема должна искать книгу по названию.\n"
+    )
+
+    found = seg.by_id("FR-7")
+    assert (found.role, found.doc_id) == ("requirement", "FR-7")
+    assert seg.ambiguous == ()
+
+
+def test_several_requirements_under_one_id_heading(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### FR-3 Выдача\n\n"
+        "Система выдаёт книгу по читательскому билету.\n\n"
+        "Система отправляет квитанцию на e-mail.\n",
+    )
+    first = unit(seg, "Система выдаёт книгу")
+    second = unit(seg, "Система отправляет квитанцию")
+
+    assert (first.id, first.doc_id) == ("FR-3", "FR-3")
+    assert second.id.startswith("R-")
+    assert second.doc_id == "FR-3"
+
+
+def test_nested_headings_and_closest_id_wins(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### FR-4 Профиль\n\n#### Описание\n\n"
+        "Система хранит профиль читателя.\n\n### FR-5 Поиск\n\n#### FR-5.1 Фильтры\n\n"
+        "Система фильтрует результаты поиска.\n",
+    )
+
+    assert unit(seg, "Система хранит профиль").id == "FR-4"
+    assert unit(seg, "Система фильтрует").id == "FR-5.1"
+    group = unit(seg, "FR-5 Поиск")
+    assert (group.role, group.doc_id) == ("heading", "FR-5")  # ID группы не теряется
+    assert not any("FR-5" in w for w in seg.warnings)
+
+
+def test_id_heading_without_requirement_text_is_reported(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### FR-6 Экспорт\n\n### FR-7 Импорт\n\n"
+        "Система импортирует каталог.\n",
+    )
+
+    empty = unit(seg, "FR-6 Экспорт")
+    assert (empty.role, empty.doc_id) == ("heading", "FR-6")
+    assert any("FR-6" in w for w in seg.warnings)
+    assert unit(seg, "Система импортирует").id == "FR-7"
+
+
+def test_plain_heading_text_is_not_an_id(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### 2.1 Создание брони\n\n"
+        "Система создаёт бронь.\n",
+    )
+
+    created = unit(seg, "Система создаёт бронь")
+    assert created.id.startswith("R-")
+    assert created.doc_id is None
+
+
+def test_repeated_heading_id_is_disambiguated(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### FR-1 Бронь\n\nСистема создаёт бронь.\n\n"
+        "### FR-1 Выдача\n\nСистема выдаёт книгу.\n",
+    )
+
+    second = unit(seg, "Система выдаёт книгу")
+    assert (second.id, second.doc_id) == ("FR-1~2", "FR-1")
+    assert any("FR-1" in w for w in second.warnings)
+
+
+def test_conflicting_id_in_text_and_heading(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### FR-8 Возврат\n\n"
+        "R-9. Система оформляет возврат книги.\n",
+    )
+
+    own = seg.by_id("R-9")
+    assert own.doc_id == "R-9"
+    assert any("R-9" in w and "FR-8" in w for w in own.warnings)
+    assert unit(seg, "FR-8 Возврат").doc_id == "FR-8"  # ID заголовка не потерян
+
+
+def test_same_id_in_text_and_heading_is_not_a_conflict(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### FR-9 Бронь\n\n"
+        "FR-9. Система бронирует книгу.\n",
+    )
+
+    booked = seg.by_id("FR-9")
+    assert (booked.role, booked.warnings) == ("requirement", ())
+    assert unit(seg, "FR-9 Бронь").doc_id is None
+
+
+def test_hierarchical_ids_under_group_heading(tmp_path: Path) -> None:
+    seg = segment_markdown(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n### FR-10 Заказы\n\n"
+        "* FR-10.1 Система создаёт заказ.\n* FR-10.2 Система отменяет заказ.\n\n"
+        "Заказы хранятся пять лет.\n",
+    )
+
+    assert seg.by_id("FR-10.1").warnings == ()
+    assert seg.by_id("FR-10.2").warnings == ()
+    assert unit(seg, "Заказы хранятся").doc_id == "FR-10"
+    assert unit(seg, "FR-10 Заказы").doc_id == "FR-10"
+
+
+def test_heading_ids_are_stable_on_rerun(tmp_path: Path) -> None:
+    first = segment_markdown(tmp_path, HEADING_IDS, "a.md")
+    second = segment_markdown(tmp_path, HEADING_IDS, "b.md")
+
+    assert first == second
+
+
 # --- одинаковая логика во всех форматах ------------------------------------------
 
 SEG_SAMPLE: tuple[Element, ...] = (

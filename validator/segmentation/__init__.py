@@ -14,6 +14,7 @@ from validator.segmentation.model import (
     SourceRef,
 )
 from validator.segmentation.segmenter import SegmentationError, segment_document
+from validator.segmentation.sources import source_location, span_sources
 from validator.segmentation.text import Statement
 from validator.segmentation.verify import verify_segmentation
 
@@ -32,5 +33,7 @@ __all__ = [
     "Statement",
     "match_segmentations",
     "segment_document",
+    "source_location",
+    "span_sources",
     "verify_segmentation",
 ]

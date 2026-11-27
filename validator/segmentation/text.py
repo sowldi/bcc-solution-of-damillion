@@ -286,8 +286,12 @@ def split_statements(text: str, start: int = 0) -> tuple[Statement, ...]:
     Предложение, которое продолжает предыдущее (связка в начале, местоимение, строчная буква
     после точки), с ним объединяется. «Например…» и «Примечание…» — отдельные утверждения
     с ролью example/explanation. Перечисления через запятую и союз «и» не делятся.
+    Часть после «;» остаётся в том же утверждении, если это перечисление (перед ней «: »)
+    или одна из частей короче трёх слов («KZT; USD; EUR»). Утверждение из одного слова
+    («Обязательно.») уточняет соседнее и присоединяется к нему.
     """
-    segments = _merge_dependent(text, _merge_letterless(text, _raw_segments(text, start)))
+    segments = _merge_letterless(text, _raw_segments(text, start))
+    segments = _merge_fragments(text, _merge_dependent(text, segments))
     return tuple(Statement(s, e, statement_role(text[s:e])) for s, e, _ in segments)
 
 
@@ -385,6 +389,23 @@ def _depends_on_previous(segment: str, previous_terminator: str) -> bool:
     return bool(set(_WORDS.findall(lowered)) & _ANAPHORA)
 
 
+_MIN_CLAUSE_WORDS = 3  # самостоятельная часть между «;» — не короче трёх слов
+_MIN_STATEMENT_WORDS = 2  # одно слово не может быть самостоятельным утверждением
+_ENUMERATION_COLON = re.compile(r":\s")  # «: » вводит перечисление (а «23:58» — нет)
+
+
+def _continues_enumeration(previous: str, segment: str, previous_terminator: str) -> bool:
+    """Часть после «;» продолжает перечисление предыдущей части, а не начинает новое
+    утверждение: перед ней было «: » или одна из частей слишком коротка."""
+    if previous_terminator != ";":
+        return False
+    return (
+        bool(_ENUMERATION_COLON.search(previous))
+        or len(_WORDS.findall(previous)) < _MIN_CLAUSE_WORDS
+        or len(_WORDS.findall(segment)) < _MIN_CLAUSE_WORDS
+    )
+
+
 def _merge_dependent(text: str, segments: list[Segment]) -> list[Segment]:
     if not segments:
         return []
@@ -392,10 +413,39 @@ def _merge_dependent(text: str, segments: list[Segment]) -> list[Segment]:
     for start, end, terminator in segments[1:]:
         segment = text[start:end]
         previous = merged[-1]
-        if statement_role(segment) == "requirement" and _depends_on_previous(segment, previous[2]):
+        joins = _depends_on_previous(segment, previous[2]) or _continues_enumeration(
+            text[previous[0] : previous[1]], segment, previous[2]
+        )
+        if statement_role(segment) == "requirement" and joins:
             merged[-1] = (previous[0], end, terminator)
         else:
             merged.append((start, end, terminator))
+    return merged
+
+
+def _merge_fragments(text: str, segments: list[Segment]) -> list[Segment]:
+    """Утверждение из одного слова («Обязательно.») присоединяется к предыдущему, а в начале
+    текста — к следующему. Примеры и пояснения не трогаются; «Поле обязательно.» — уже два
+    слова и остаётся отдельным утверждением."""
+    merged: list[Segment] = []
+    pending: Segment | None = None  # одно слово в начале текста ждёт следующего утверждения
+    for start, end, terminator in segments:
+        piece = text[start:end]
+        short = (
+            statement_role(piece) == "requirement"
+            and len(_WORDS.findall(piece)) < _MIN_STATEMENT_WORDS
+        )
+        if pending is not None:
+            merged.append((pending[0], end, terminator))
+            pending = None
+        elif short and merged:
+            merged[-1] = (merged[-1][0], end, terminator)
+        elif short:
+            pending = (start, end, terminator)
+        else:
+            merged.append((start, end, terminator))
+    if pending is not None:
+        merged.append(pending)
     return merged
 
 

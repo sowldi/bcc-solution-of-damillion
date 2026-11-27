@@ -7,28 +7,15 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
-from validator.model import Block, Document, Location
+from validator.model import Document
 from validator.segmentation.model import Requirement, Segmentation, SourceRef
+
+# source_location живёт в sources.py; импорт здесь сохраняет прежний путь
+# validator.segmentation.verify.source_location для обратной совместимости.
+from validator.segmentation.sources import source_location
 from validator.segmentation.text import parse_prefix
 
-
-def source_location(block: Block, start: int, end: int) -> Location:
-    """Место цитаты block.text[start:end].
-
-    Строки уточняются до цитаты, только если число строк текста блока совпадает с диапазоном
-    строк источника (MD, TXT, PDF); иначе возвращается место всего блока — без выдуманной точности.
-    """
-    location = block.location
-    if location.line_start is None or location.line_end is None:
-        return location
-    text = block.text
-    if text.count("\n") != location.line_end - location.line_start:
-        return location
-    first = location.line_start + text.count("\n", 0, start)
-    last = location.line_start + text.count("\n", 0, max(start, end - 1))
-    return replace(location, line_start=first, line_end=last)
+__all__ = ["source_location", "verify_segmentation"]
 
 
 def verify_segmentation(segmentation: Segmentation, document: Document) -> tuple[str, ...]:

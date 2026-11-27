@@ -3,11 +3,13 @@
 Порядок работы:
 1. каждый блок классифицируется (rules.classify); абзац со строчной буквы после фрагмента без
    конечной пунктуации в том же разделе — продолжение предыдущего фрагмента (несколько источников);
+   значения JSON рядом со строками JSON — тоже код (JSON, набранный абзацем на строку);
 2. связи: пункты списка после фрагмента, оканчивающегося «:», — части перечисления этого
    фрагмента; блок-пример или блок-пояснение — к ближайшему предыдущему требованию раздела;
+   ID документа из заголовка («### FR-1 …») передаётся требованию под этим заголовком;
 3. ID: идентификатор документа или содержательный хеш; повторы — суффикс «~N»;
 4. фрагмент-требование (абзац или пункт), где несколько самостоятельных утверждений, делится
-   на утверждения «X/1», «X/2» с точными смещениями в источнике;
+   на утверждения «X/1», «X/2»; их источники вычисляет публичная span_sources;
 5. похожие (не дословные) требования связываются через similar_to;
 6. результат проверяется verify_segmentation — при нарушении SegmentationError (это ошибка
    агента, а не документа, и молча не пропускается).
@@ -19,6 +21,7 @@ import hashlib
 from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 
+from validator.ingest.common import one_line
 from validator.model import Block, BlockKind, Document
 from validator.segmentation.model import (
     Category,
@@ -28,7 +31,14 @@ from validator.segmentation.model import (
     Segmentation,
     SourceRef,
 )
-from validator.segmentation.rules import classify
+from validator.segmentation.rules import (
+    W_MODAL_OUTSIDE,
+    W_MODAL_REFERENCE,
+    W_SUBJECT_OUTSIDE,
+    classify,
+    looks_like_json_value,
+)
+from validator.segmentation.sources import source_location, span_sources
 from validator.segmentation.text import (
     Prefix,
     Statement,
@@ -39,7 +49,7 @@ from validator.segmentation.text import (
     parse_prefix,
     split_statements,
 )
-from validator.segmentation.verify import source_location, verify_segmentation
+from validator.segmentation.verify import verify_segmentation
 
 
 class SegmentationError(RuntimeError):
@@ -76,6 +86,9 @@ class _Unit:
     confidence: Confidence
     detection: list[str]
     warnings: list[str]
+    doc_id: str | None = None  # ID документа фрагмента: свой или унаследованный от заголовка
+    id_base: str | None = None  # ID документа, который фрагмент несёт как свой ID; иначе хеш
+    declared_id: str | None = None  # ID документа в тексте заголовка («FR-1 Создание заказа»)
     id: str = ""
     parent: _Unit | None = None
     duplicate_of: str | None = None
@@ -89,12 +102,15 @@ class _Unit:
 
 def segment_document(document: Document) -> Segmentation:
     units = _build_units(document.blocks)
+    _mark_code_sequences(units)
     _link_enumerations(units)
     _link_notes(units)
+    heading_warnings = _link_heading_ids(units)
     _assign_ids(units)
     _split_statements(units)
     fragments = _link_similar(_materialize(units, document))
-    segmentation = Segmentation(document.sha256, tuple(fragments), _global_warnings(fragments))
+    warnings = (*heading_warnings, *_global_warnings(fragments))
+    segmentation = Segmentation(document.sha256, tuple(fragments), warnings)
     problems = verify_segmentation(segmentation, document)
     if problems:
         details = "; ".join(problems[:5])
@@ -109,6 +125,9 @@ def _prefix(block: Block) -> Prefix:
     if block.kind == "table_row":
         first = block.cells[0].strip() if block.cells else ""
         return Prefix(first if is_document_id(first) else None, None, 0)
+    if block.kind == "heading":
+        # ID в заголовке относится к требованию под ним (_link_heading_ids), а не к заголовку
+        return Prefix(None, None, 0)
     return parse_prefix(block.text, block.kind)
 
 
@@ -124,6 +143,7 @@ def _build_units(blocks: tuple[Block, ...]) -> list[_Unit]:
             continue
         prefix = _prefix(block)
         result = classify(block, prefix)
+        declared = parse_prefix(block.text, block.kind).doc_id if block.kind == "heading" else None
         units.append(
             _Unit(
                 pieces=[_Piece(index, len(block.text), 0)],
@@ -136,9 +156,41 @@ def _build_units(blocks: tuple[Block, ...]) -> list[_Unit]:
                 confidence=result.confidence,
                 detection=list(result.detection),
                 warnings=list(result.warnings),
+                doc_id=prefix.doc_id,
+                id_base=prefix.doc_id,
+                declared_id=declared,
             )
         )
     return units
+
+
+def _mark_code_sequences(units: list[_Unit]) -> None:
+    """Значение JSON («"push",», «1,») внутри серии строк кода того же раздела — тоже код.
+
+    Вперёд: значение после строки кода (внутри открытой структуры). Назад: значение перед
+    строкой кода — только с запятой в конце («"a",»), то есть элемент перечня. Метка вроде
+    «404» перед примером ответа запятой не оканчивается и кодом не становится.
+    """
+    for ordered, needs_comma in ((units, False), (units[::-1], True)):
+        previous: _Unit | None = None
+        for unit in ordered:
+            neighbour_is_code = (
+                previous is not None
+                and previous.role == "code"
+                and previous.section_path == unit.section_path
+            )
+            if (
+                neighbour_is_code
+                and unit.role != "code"
+                and unit.kind in ("paragraph", "list_item")
+                and looks_like_json_value(unit.text)
+                and (not needs_comma or unit.text.rstrip().endswith(","))
+            ):
+                sections = [tag for tag in unit.detection if tag.startswith("section:")]
+                unit.role, unit.confidence = "code", "high"
+                unit.detection = [*sections, "code_sequence"]
+                unit.warnings = []
+            previous = unit
 
 
 def _continues(previous: _Unit, block: Block) -> bool:
@@ -204,6 +256,100 @@ def _attach(unit: _Unit, parent: _Unit) -> None:
     parent.attached.append(unit)
 
 
+# Предупреждения «вне раздела требований» неверны для текста под заголовком с ID требования.
+_OUTSIDE_WARNINGS = frozenset({W_MODAL_OUTSIDE, W_SUBJECT_OUTSIDE, W_MODAL_REFERENCE})
+
+
+@dataclass
+class _HeadingScope:
+    heading: _Unit
+    path: tuple[str, ...]  # путь раздела, который открывает заголовок
+    members: list[_Unit] = field(default_factory=list)  # фрагменты, для которых он ближайший
+    has_content: bool = False  # есть ли в разделе (включая вложенные) хоть один фрагмент
+
+
+def _link_heading_ids(units: list[_Unit]) -> list[str]:
+    """ID документа в заголовке («### FR-1 Создание заказа») относится к требованию под ним.
+
+    Область заголовка — фрагменты его раздела, включая вложенные подразделы; ближайший
+    заголовок с ID важнее внешнего. Правила, без угадывания:
+    - текст под заголовком с ID — требование (неоднозначный абзац становится требованием);
+    - требование области со своим таким же ID несёт этот ID;
+    - если своих ID в области нет, ID получает первое требование-абзац или пункт верхнего
+      уровня, остальные требования области наследуют doc_id;
+    - если свои ID другие, ID остаётся у заголовка как ID группы; свой ID, не вложенный в ID
+      заголовка («FR-10.1» в «FR-10» — вложенный), — конфликт с предупреждением;
+    - заголовок с ID без текста в разделе — общее предупреждение.
+    Возвращает общие предупреждения сегментации.
+    """
+    scopes: list[_HeadingScope] = []
+    for unit in units:
+        if unit.kind == "heading":
+            if unit.declared_id:
+                scopes.append(_HeadingScope(unit, (*unit.section_path, one_line(unit.text))))
+            continue
+        closest: _HeadingScope | None = None
+        for scope in scopes:
+            if unit.section_path[: len(scope.path)] == scope.path:
+                scope.has_content = True
+                if closest is None or len(scope.path) >= len(closest.path):
+                    closest = scope
+        if closest is not None:
+            closest.members.append(unit)
+    warnings: list[str] = []
+    for scope in scopes:
+        warnings += _apply_heading_id(scope)
+    return warnings
+
+
+def _apply_heading_id(scope: _HeadingScope) -> list[str]:
+    heading, declared = scope.heading, scope.heading.declared_id
+    if declared is None:  # область создаётся только для заголовков с ID
+        return []
+    for unit in scope.members:
+        if unit.role == "ambiguous" and unit.kind in ("paragraph", "list_item"):
+            unit.role, unit.confidence = "requirement", "medium"
+            unit.warnings = [w for w in unit.warnings if w not in _OUTSIDE_WARNINGS]
+            _tag(unit, "doc_id:heading_scope")
+    candidates = [unit for unit in scope.members if unit.role == "requirement"]
+    own = [unit for unit in candidates if unit.id_base]
+    inheriting = [unit for unit in candidates if not unit.id_base]
+    bearer = next((unit for unit in own if unit.id_base == declared), None)
+    if bearer is None and not own:
+        bearer = next(
+            (u for u in inheriting if u.kind in ("paragraph", "list_item") and u.parent is None),
+            None,
+        )
+        if bearer is not None:
+            bearer.id_base = bearer.doc_id = declared
+            _tag(bearer, "doc_id:heading")
+            inheriting.remove(bearer)
+    for unit in inheriting:
+        unit.doc_id = declared
+        _tag(unit, "doc_id:heading_scope")
+    for unit in own:
+        if unit is not bearer and not _nested_id(unit.id_base, declared):
+            unit.warnings.append(
+                f"Идентификатор в тексте «{unit.id_base}» не совпадает "
+                f"с идентификатором заголовка «{declared}»."
+            )
+    heading.doc_id = None if bearer is not None else declared
+    if not scope.has_content:
+        title = one_line(heading.text)
+        return [f"Под заголовком «{title}» с идентификатором «{declared}» нет текста требования."]
+    return []
+
+
+def _nested_id(child: str | None, parent: str) -> bool:
+    """«FR-10.1» вложен в «FR-10»; «FR-100» и «R-9» — нет."""
+    return child is not None and child.startswith((f"{parent}.", f"{parent}-", f"{parent}_"))
+
+
+def _tag(unit: _Unit, tag: str) -> None:
+    if tag not in unit.detection:
+        unit.detection.append(tag)
+
+
 # --- 3. идентификаторы и дубли ----------------------------------------------------------
 
 
@@ -219,16 +365,15 @@ def _assign_ids(units: list[_Unit]) -> None:
     by_content: dict[str, _Unit] = {}
     for unit in units:
         key = content_key(unit.body)
-        base = unit.prefix.doc_id or content_id(unit.role, unit.body)
+        base = unit.id_base or content_id(unit.role, unit.body)
         count = used.get(base, 0) + 1
         used[base] = count
         unit.id = base if count == 1 else f"{base}~{count}"
         if count == 1:
             first[base] = unit
-        elif unit.prefix.doc_id and content_key(first[base].body) != key:
+        elif unit.id_base and content_key(first[base].body) != key:
             unit.warnings.append(
-                f"Идентификатор «{unit.prefix.doc_id}» уже использован в документе "
-                f"({first[base].id})."
+                f"Идентификатор «{unit.id_base}» уже использован в документе ({first[base].id})."
             )
         if unit.role in _ANALYZED and key:
             original = by_content.setdefault(key, unit)
@@ -266,7 +411,7 @@ def _check_statements(statements: tuple[Statement, ...], unit: _Unit) -> None:
 
 def _materialize(units: list[_Unit], document: Document) -> list[Requirement]:
     blocks = document.blocks
-    doc_ids = {unit.prefix.doc_id for unit in units if unit.prefix.doc_id}
+    doc_ids = {unit.doc_id for unit in units if unit.doc_id}
     headings = [block.text for block in blocks if block.kind == "heading"]
 
     def references(role: Role, text: str, own_id: str | None) -> tuple[str, ...]:
@@ -277,28 +422,34 @@ def _materialize(units: list[_Unit], document: Document) -> list[Requirement]:
     fragments: list[Requirement] = []
     for unit in units:
         statement_ids = [f"{unit.id}/{k}" for k in range(1, len(unit.statements) + 1)]
-        fragments.append(
-            Requirement(
-                id=unit.id,
-                text=unit.text,
-                normalized=normalize_text(unit.body),
-                role=unit.role,
-                category=unit.category,
-                sources=_refs(unit, 0, len(unit.text), blocks),
-                section_path=unit.section_path,
-                doc_id=unit.prefix.doc_id,
-                doc_number=unit.prefix.number,
-                parent_id=unit.parent.id if unit.parent else None,
-                children=(*statement_ids, *(child.id for child in unit.attached)),
-                duplicate_of=unit.duplicate_of,
-                references=references(unit.role, unit.text, unit.prefix.doc_id),
-                detection=tuple(unit.detection),
-                confidence=unit.confidence,
-                warnings=tuple(unit.warnings),
-            )
+        whole = Requirement(
+            id=unit.id,
+            text=unit.text,
+            normalized=normalize_text(unit.body),
+            role=unit.role,
+            category=unit.category,
+            sources=tuple(
+                SourceRef(p.block, 0, p.length, source_location(blocks[p.block], 0, p.length))
+                for p in unit.pieces
+            ),
+            section_path=unit.section_path,
+            doc_id=unit.doc_id,
+            doc_number=unit.prefix.number,
+            parent_id=unit.parent.id if unit.parent else None,
+            children=(*statement_ids, *(child.id for child in unit.attached)),
+            duplicate_of=unit.duplicate_of,
+            references=references(unit.role, unit.text, unit.doc_id),
+            detection=tuple(unit.detection),
+            confidence=unit.confidence,
+            warnings=tuple(unit.warnings),
         )
+        fragments.append(whole)
         for statement_id, statement in zip(statement_ids, unit.statements, strict=True):
             text = unit.text[statement.start : statement.end]
+            try:
+                sources = span_sources(whole, statement.start, statement.end, document)
+            except ValueError as exc:  # ошибка агента, а не документа — не пропускаем молча
+                raise SegmentationError(f"Утверждение {statement_id}: {exc}") from exc
             fragments.append(
                 Requirement(
                     id=statement_id,
@@ -306,31 +457,17 @@ def _materialize(units: list[_Unit], document: Document) -> list[Requirement]:
                     normalized=normalize_text(text),
                     role=statement.role,
                     category=unit.category,
-                    sources=_refs(unit, statement.start, statement.end, blocks),
+                    sources=sources,
                     section_path=unit.section_path,
-                    doc_id=unit.prefix.doc_id,
+                    doc_id=unit.doc_id,
                     doc_number=unit.prefix.number,
                     parent_id=unit.id,
-                    references=references(statement.role, text, unit.prefix.doc_id),
+                    references=references(statement.role, text, unit.doc_id),
                     detection=(*unit.detection, "sentence_split"),
                     confidence=unit.confidence,
                 )
             )
     return fragments
-
-
-def _refs(unit: _Unit, start: int, end: int, blocks: tuple[Block, ...]) -> tuple[SourceRef, ...]:
-    """Перевести отрезок текста фрагмента в ссылки на блоки (с уточнённым местом)."""
-    refs: list[SourceRef] = []
-    for piece in unit.pieces:
-        begin = max(start, piece.offset)
-        finish = min(end, piece.offset + piece.length)
-        if begin < finish or (begin == finish == piece.offset and piece.length == 0):
-            block = blocks[piece.block]
-            local_start, local_end = begin - piece.offset, finish - piece.offset
-            location = source_location(block, local_start, local_end)
-            refs.append(SourceRef(piece.block, local_start, local_end, location))
-    return tuple(refs)
 
 
 # --- 6. похожие требования и общие предупреждения ------------------------------------------
