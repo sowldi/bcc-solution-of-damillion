@@ -1,0 +1,1953 @@
+{
+  "meta": {
+    "date": "2026-11-27 17:58 UTC",
+    "commit": "b2a6f7d-dirty",
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD",
+    "cpu_count": 8,
+    "packages": {
+      "pymupdf": "1.28.2",
+      "python-docx": "1.2.0",
+      "markdown-it-py": "4.3.0",
+      "python-dotenv": "1.2.4"
+    },
+    "labels_sha256": {
+      "fitness.labels.json": "4aaab178e6736a58948c50309b23c7fdc2f4b6f352c52188adf5947dda95904e",
+      "fitness.md": "ddbc1b4665aa9317a2bb07ef3ef4d93edd5c78eb045b9ed21bfe424ef3ca3ed0",
+      "flowers.labels.json": "1c59f66f565571327684dd1f816aff880e31a7b1b0db9128339b1d590833b32c",
+      "flowers.md": "9a2a074f84791cfc52bb72788a86c4e474cae2d655672088b4d8746597a12b3b"
+    }
+  },
+  "corpus": {
+    "documents": [
+      {
+        "document": "library.md",
+        "split": "dev",
+        "requirements": 37,
+        "ambiguous": 0,
+        "findings": 19,
+        "per_rule": {
+          "ACC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-06": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CON-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-01": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        "tp": [
+          {
+            "label": "TST-01",
+            "anchor": "Ф-2",
+            "finding": "TST-01:Ф-2@20",
+            "rule": "TST-01"
+          },
+          {
+            "label": "TST-02",
+            "anchor": "Ф-5",
+            "finding": "TST-02:Ф-5@5",
+            "rule": "TST-02"
+          },
+          {
+            "label": "TST-03",
+            "anchor": "Ф-6",
+            "finding": "TST-03:Ф-6@5",
+            "rule": "TST-03"
+          },
+          {
+            "label": "AMB-01",
+            "anchor": "Ф-8",
+            "finding": "AMB-01:Ф-8@33",
+            "rule": "AMB-01"
+          },
+          {
+            "label": "AMB-02",
+            "anchor": "Ф-10",
+            "finding": "AMB-02:Ф-10@21",
+            "rule": "AMB-02"
+          },
+          {
+            "label": "AMB-03",
+            "anchor": "Ф-12",
+            "finding": "AMB-03:Ф-12@14",
+            "rule": "AMB-03"
+          },
+          {
+            "label": "AMB-04",
+            "anchor": "Ф-13",
+            "finding": "AMB-04:Ф-13@6",
+            "rule": "AMB-04"
+          },
+          {
+            "label": "AMB-05",
+            "anchor": "Ф-15",
+            "finding": "AMB-05:Ф-15@33",
+            "rule": "AMB-05"
+          },
+          {
+            "label": "CMP-01",
+            "anchor": "Ф-17",
+            "finding": "CMP-01:Ф-17@35",
+            "rule": "CMP-01"
+          },
+          {
+            "label": "CMP-02",
+            "anchor": "Ф-19",
+            "finding": "CMP-02:Ф-19@60",
+            "rule": "CMP-02"
+          },
+          {
+            "label": "TRC-03",
+            "anchor": "Ф-21",
+            "finding": "TRC-03:Ф-21@48",
+            "rule": "TRC-03"
+          },
+          {
+            "label": "TRC-01",
+            "anchor": "quote:Читатель оставляет отзыв",
+            "finding": "TRC-01:R-de23db90@0",
+            "rule": "TRC-01"
+          },
+          {
+            "label": "CMP-06",
+            "anchor": "Ф-23",
+            "finding": "CMP-06:Ф-23@45",
+            "rule": "CMP-06"
+          },
+          {
+            "label": "TST-05",
+            "anchor": "Н-1",
+            "finding": "TST-01:Н-1@24",
+            "rule": "TST-01"
+          },
+          {
+            "label": "TST-04",
+            "anchor": "Н-3",
+            "finding": "TST-05:Н-3@5",
+            "rule": "TST-05"
+          },
+          {
+            "label": "CON-03",
+            "anchor": "quote:Срок хранения брони",
+            "finding": "CON-03:R-5efc28f3@0+R-6323a87f@0",
+            "rule": "CON-03"
+          },
+          {
+            "label": "CMP-03",
+            "anchor": "quote:Штраф за день просрочки",
+            "finding": "CMP-03:R-19f17855@0",
+            "rule": "CMP-03"
+          },
+          {
+            "label": "ACC-01",
+            "anchor": "quote:читатель без действующего",
+            "finding": "ACC-01:R-e927f51b@0+R-95410683@0",
+            "rule": "ACC-01"
+          }
+        ],
+        "fn": [],
+        "fp": [],
+        "traps": [
+          {
+            "anchor": "Ф-3",
+            "rules": [
+              "TST-01"
+            ],
+            "note": "«быстро» с числовым критерием",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-7",
+            "rules": [
+              "TST-03"
+            ],
+            "note": "конкретное условие «если требуется подтверждение»",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-9",
+            "rules": [
+              "AMB-01"
+            ],
+            "note": "количество уточнено перечнем после двоеточия",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-11",
+            "rules": [
+              "AMB-02"
+            ],
+            "note": "«около» без числа — расположение, не значение",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-14",
+            "rules": [
+              "AMB-04"
+            ],
+            "note": "«Данные» — существительное",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-16",
+            "rules": [
+              "AMB-05"
+            ],
+            "note": "сокращение расшифровано в скобках",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-18",
+            "rules": [
+              "CMP-01"
+            ],
+            "note": "«будет определён» — правило, не заглушка",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-20",
+            "rules": [
+              "CMP-02"
+            ],
+            "note": "«и далее» — последовательность действий",
+            "hits": []
+          },
+          {
+            "anchor": "Ф-22",
+            "rules": [
+              "TRC-03"
+            ],
+            "note": "ссылка на существующее требование",
+            "hits": []
+          },
+          {
+            "anchor": "Н-2",
+            "rules": [
+              "TST-05"
+            ],
+            "note": "атрибут качества с числом",
+            "hits": []
+          }
+        ],
+        "contradictions": [
+          {
+            "anchor": "quote:Срок хранения брони",
+            "pair": null,
+            "expected": "confirmed",
+            "observed": [
+              "confirmed"
+            ],
+            "ok": true,
+            "note": "3 дня и 5 дней не пересекаются"
+          }
+        ],
+        "semantic": [
+          {
+            "anchor": "Ф-24",
+            "category": "missing_condition",
+            "note": "не сказано, когда отправляется напоминание",
+            "flagged_by_rules": []
+          }
+        ],
+        "related_pairs": [
+          {
+            "pair": [
+              "Ф-8",
+              "Ф-9"
+            ],
+            "candidate": false,
+            "linked": false
+          },
+          {
+            "pair": [
+              "Ф-4",
+              "Ф-6"
+            ],
+            "candidate": false,
+            "linked": false
+          }
+        ],
+        "candidates": 30,
+        "verdict": {
+          "expected": "not_recommended",
+          "observed": "not_recommended"
+        }
+      },
+      {
+        "document": "rooms.md",
+        "split": "dev",
+        "requirements": 21,
+        "ambiguous": 0,
+        "findings": 11,
+        "per_rule": {
+          "CMP-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-07": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CON-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CTR-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CTR-02": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-06": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        "tp": [
+          {
+            "label": "CTR-01",
+            "anchor": "Р-2",
+            "finding": "CTR-01:Р-2@5+Р-3@5",
+            "rule": "CTR-01"
+          },
+          {
+            "label": "TRC-02",
+            "anchor": "Р-9",
+            "finding": "TRC-02:Р-9@0+Р-9~2@0",
+            "rule": "TRC-02"
+          },
+          {
+            "label": "CON-01",
+            "anchor": "Р-10",
+            "finding": "CON-01:Р-10@6+Р-10~2@6",
+            "rule": "CON-01"
+          },
+          {
+            "label": "TRC-04",
+            "anchor": "PР-11",
+            "finding": "TRC-04:PР-11@0",
+            "rule": "TRC-04"
+          },
+          {
+            "label": "TRC-06",
+            "anchor": "Р-12.1",
+            "finding": "TRC-06:Р-12.1@0",
+            "rule": "TRC-06"
+          },
+          {
+            "label": "CMP-04",
+            "anchor": "Р-13",
+            "finding": "CMP-04:Р-13@6",
+            "rule": "CMP-04"
+          },
+          {
+            "label": "CMP-07",
+            "anchor": "Р-14",
+            "finding": "CMP-07:F-1a3c6443@0",
+            "rule": "CMP-07"
+          },
+          {
+            "label": "TRC-05",
+            "anchor": "Р-16",
+            "finding": "TRC-05:F-2f72704d@0+Р-16@0",
+            "rule": "TRC-05"
+          },
+          {
+            "label": "CTR-02",
+            "anchor": "Н-1",
+            "finding": "CTR-02:Р-2@5+Н-1@5",
+            "rule": "CTR-02"
+          },
+          {
+            "label": "CTR-02",
+            "anchor": "Н-1",
+            "finding": "CTR-02:Р-3@5+Н-1@5",
+            "rule": "CTR-02"
+          },
+          {
+            "label": "CMP-05",
+            "anchor": "quote:Роль",
+            "finding": "CMP-05:F-3bcc620a@0+F-e3b0c442@0",
+            "rule": "CMP-05"
+          }
+        ],
+        "fn": [],
+        "fp": [],
+        "traps": [
+          {
+            "anchor": "Р-4",
+            "rules": [
+              "CTR-01",
+              "CTR-02"
+            ],
+            "note": "разные условия: рабочие и выходные дни",
+            "hits": []
+          },
+          {
+            "anchor": "Р-6",
+            "rules": [
+              "CTR-01",
+              "CTR-02"
+            ],
+            "note": "разные параметры: вложение и фотография",
+            "hits": []
+          },
+          {
+            "anchor": "Н-2",
+            "rules": [
+              "AMB-03",
+              "TST-05"
+            ],
+            "note": "периодичность указана числом",
+            "hits": []
+          }
+        ],
+        "contradictions": [
+          {
+            "anchor": "Р-2",
+            "pair": "Р-3",
+            "expected": "confirmed",
+            "observed": [
+              "confirmed"
+            ],
+            "ok": true,
+            "note": "не более 4 и 6 часов"
+          }
+        ],
+        "semantic": [
+          {
+            "anchor": "Р-8",
+            "category": "missing_condition",
+            "note": "не указано, через сколько отменяется бронь",
+            "flagged_by_rules": []
+          }
+        ],
+        "related_pairs": [
+          {
+            "pair": [
+              "Р-8",
+              "Р-9"
+            ],
+            "candidate": true,
+            "linked": false
+          },
+          {
+            "pair": [
+              "Р-1",
+              "Р-8"
+            ],
+            "candidate": true,
+            "linked": false
+          }
+        ],
+        "candidates": 11,
+        "verdict": {
+          "expected": "not_recommended",
+          "observed": "not_recommended"
+        }
+      },
+      {
+        "document": "fitness.md",
+        "split": "test",
+        "requirements": 32,
+        "ambiguous": 0,
+        "findings": 15,
+        "per_rule": {
+          "AMB-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CON-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CTR-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CTR-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-01": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          },
+          "TST-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-05": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          }
+        },
+        "tp": [
+          {
+            "label": "AMB-03",
+            "anchor": "К-3",
+            "finding": "AMB-03:К-3@38",
+            "rule": "AMB-03"
+          },
+          {
+            "label": "TST-02",
+            "anchor": "К-4",
+            "finding": "TST-02:К-4@12",
+            "rule": "TST-02"
+          },
+          {
+            "label": "TST-04",
+            "anchor": "К-6",
+            "finding": "TST-04:К-6@13",
+            "rule": "TST-04"
+          },
+          {
+            "label": "AMB-01",
+            "anchor": "К-7",
+            "finding": "AMB-01:К-7@21",
+            "rule": "AMB-01"
+          },
+          {
+            "label": "AMB-02",
+            "anchor": "К-8",
+            "finding": "AMB-02:К-8@33",
+            "rule": "AMB-02"
+          },
+          {
+            "label": "AMB-04",
+            "anchor": "К-9",
+            "finding": "AMB-04:К-9@5",
+            "rule": "AMB-04"
+          },
+          {
+            "label": "AMB-05",
+            "anchor": "К-10",
+            "finding": "AMB-05:К-10@42",
+            "rule": "AMB-05"
+          },
+          {
+            "label": "CMP-01",
+            "anchor": "К-11",
+            "finding": "CMP-01:К-11@41",
+            "rule": "CMP-01"
+          },
+          {
+            "label": "CMP-02",
+            "anchor": "К-12",
+            "finding": "CMP-02:К-12@54",
+            "rule": "CMP-02"
+          },
+          {
+            "label": "TRC-03",
+            "anchor": "К-13",
+            "finding": "TRC-03:К-13@48",
+            "rule": "TRC-03"
+          },
+          {
+            "label": "TRC-01",
+            "anchor": "quote:Клиент оставляет отзыв",
+            "finding": "TRC-01:R-3e4c953c@0",
+            "rule": "TRC-01"
+          },
+          {
+            "label": "CTR-01",
+            "anchor": "К-16",
+            "finding": "CTR-01:К-16@6+К-17@6",
+            "rule": "CTR-01"
+          },
+          {
+            "label": "CTR-02",
+            "anchor": "К-18",
+            "finding": "CTR-02:К-18@6+К-19@6",
+            "rule": "CTR-02"
+          },
+          {
+            "label": "CON-03",
+            "anchor": "quote:Срок действия",
+            "finding": "CON-03:R-14020353@0+R-0535d146@0",
+            "rule": "CON-03"
+          },
+          {
+            "label": "CMP-03",
+            "anchor": "quote:Пробное занятие",
+            "finding": "CMP-03:R-0d6b20a1@0",
+            "rule": "CMP-03"
+          }
+        ],
+        "fn": [
+          {
+            "rule": "TST-01",
+            "anchor": "К-2",
+            "note": "«наглядным» — субъективная оценка"
+          },
+          {
+            "rule": "TST-05",
+            "anchor": "Н-1",
+            "note": "«производительно» без числа"
+          }
+        ],
+        "fp": [],
+        "traps": [
+          {
+            "anchor": "К-5",
+            "rules": [
+              "AMB-03",
+              "TST-03"
+            ],
+            "note": "срок указан числом",
+            "hits": []
+          },
+          {
+            "anchor": "К-14",
+            "rules": [
+              "TRC-03"
+            ],
+            "note": "ссылка на существующее требование",
+            "hits": []
+          },
+          {
+            "anchor": "К-15",
+            "rules": [
+              "TST-02",
+              "TST-03"
+            ],
+            "note": "отрицание с условием",
+            "hits": []
+          },
+          {
+            "anchor": "К-20",
+            "rules": [
+              "CTR-01",
+              "CTR-02"
+            ],
+            "note": "разные параметры: шкафчик для одежды и для обуви",
+            "hits": []
+          },
+          {
+            "anchor": "Н-2",
+            "rules": [
+              "TST-05"
+            ],
+            "note": "время открытия указано числом",
+            "hits": []
+          }
+        ],
+        "contradictions": [
+          {
+            "anchor": "К-16",
+            "pair": "К-17",
+            "expected": "confirmed",
+            "observed": [
+              "confirmed"
+            ],
+            "ok": true,
+            "note": "30 и 45 дней"
+          },
+          {
+            "anchor": "quote:Срок действия",
+            "pair": null,
+            "expected": "potential",
+            "observed": [
+              "potential"
+            ],
+            "ok": true,
+            "note": "12 месяцев и 1 год равны — не противоречие"
+          }
+        ],
+        "semantic": [
+          {
+            "anchor": "К-22",
+            "category": "completeness",
+            "note": "не указано правило списания бонусов",
+            "flagged_by_rules": []
+          }
+        ],
+        "related_pairs": [
+          {
+            "pair": [
+              "К-7",
+              "К-9"
+            ],
+            "candidate": true,
+            "linked": false
+          },
+          {
+            "pair": [
+              "К-8",
+              "К-16"
+            ],
+            "candidate": true,
+            "linked": false
+          }
+        ],
+        "candidates": 9,
+        "verdict": {
+          "expected": "not_recommended",
+          "observed": "not_recommended"
+        }
+      },
+      {
+        "document": "flowers.md",
+        "split": "test",
+        "requirements": 30,
+        "ambiguous": 0,
+        "findings": 19,
+        "per_rule": {
+          "ACC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "AMB-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CMP-06": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CON-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CTR-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "CTR-02": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TRC-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "TST-05": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          }
+        },
+        "tp": [
+          {
+            "label": "TST-01",
+            "anchor": "Д-2",
+            "finding": "TST-01:Д-2@23",
+            "rule": "TST-01"
+          },
+          {
+            "label": "TST-02",
+            "anchor": "Д-4",
+            "finding": "TST-02:Д-4@12",
+            "rule": "TST-02"
+          },
+          {
+            "label": "TST-03",
+            "anchor": "Д-5",
+            "finding": "TST-03:Д-5@5",
+            "rule": "TST-03"
+          },
+          {
+            "label": "AMB-01",
+            "anchor": "Д-6",
+            "finding": "AMB-01:Д-6@25",
+            "rule": "AMB-01"
+          },
+          {
+            "label": "AMB-02",
+            "anchor": "Д-8",
+            "finding": "AMB-02:Д-8@23",
+            "rule": "AMB-02"
+          },
+          {
+            "label": "AMB-03",
+            "anchor": "Д-9",
+            "finding": "AMB-03:Д-9@12",
+            "rule": "AMB-03"
+          },
+          {
+            "label": "AMB-04",
+            "anchor": "Д-11",
+            "finding": "AMB-04:Д-11@6",
+            "rule": "AMB-04"
+          },
+          {
+            "label": "AMB-05",
+            "anchor": "Д-12",
+            "finding": "AMB-05:Д-12@33",
+            "rule": "AMB-05"
+          },
+          {
+            "label": "CMP-01",
+            "anchor": "Д-13",
+            "finding": "CMP-01:Д-13@34",
+            "rule": "CMP-01"
+          },
+          {
+            "label": "CMP-02",
+            "anchor": "Д-15",
+            "finding": "CMP-02:Д-15@45",
+            "rule": "CMP-02"
+          },
+          {
+            "label": "TRC-03",
+            "anchor": "Д-16",
+            "finding": "TRC-03:Д-16@42",
+            "rule": "TRC-03"
+          },
+          {
+            "label": "TRC-01",
+            "anchor": "quote:Покупатель оценивает работу",
+            "finding": "TRC-01:R-f0a35a99@0",
+            "rule": "TRC-01"
+          },
+          {
+            "label": "CMP-06",
+            "anchor": "Д-18",
+            "finding": "CMP-06:Д-18@32",
+            "rule": "CMP-06"
+          },
+          {
+            "label": "CTR-01",
+            "anchor": "Д-20",
+            "finding": "CTR-01:Д-20@6+Д-21@6",
+            "rule": "CTR-01"
+          },
+          {
+            "label": "CTR-02",
+            "anchor": "Н-3",
+            "finding": "CTR-02:Д-20@6+Н-3@5",
+            "rule": "CTR-02"
+          },
+          {
+            "label": "CTR-02",
+            "anchor": "Н-3",
+            "finding": "CTR-02:Д-21@6+Н-3@5",
+            "rule": "CTR-02"
+          },
+          {
+            "label": "CON-03",
+            "anchor": "quote:Доставка по городу",
+            "finding": "CON-03:F-5fca56ef@0+F-435a9cfb@0",
+            "rule": "CON-03"
+          },
+          {
+            "label": "CMP-03",
+            "anchor": "quote:Срочная доставка",
+            "finding": "CMP-03:F-7c7361da@0",
+            "rule": "CMP-03"
+          },
+          {
+            "label": "ACC-01",
+            "anchor": "quote:покупатель оплатил заказ",
+            "finding": "ACC-01:R-dbd46e6b@0+R-6be32a12@0",
+            "rule": "ACC-01"
+          }
+        ],
+        "fn": [
+          {
+            "rule": "TST-05",
+            "anchor": "Н-1",
+            "note": "«стабильно» без числового критерия"
+          }
+        ],
+        "fp": [],
+        "traps": [
+          {
+            "anchor": "Д-3",
+            "rules": [
+              "TST-01"
+            ],
+            "note": "«быстро» с числовым критерием",
+            "hits": []
+          },
+          {
+            "anchor": "Д-7",
+            "rules": [
+              "AMB-01"
+            ],
+            "note": "количество уточнено в скобках",
+            "hits": []
+          },
+          {
+            "anchor": "Д-10",
+            "rules": [
+              "AMB-03"
+            ],
+            "note": "срок указан числом",
+            "hits": []
+          },
+          {
+            "anchor": "Д-14",
+            "rules": [
+              "CMP-02"
+            ],
+            "note": "«и далее» — последовательность действий",
+            "hits": []
+          },
+          {
+            "anchor": "Д-17",
+            "rules": [
+              "TRC-03"
+            ],
+            "note": "ссылка на существующее требование",
+            "hits": []
+          },
+          {
+            "anchor": "Д-19",
+            "rules": [
+              "TST-02",
+              "TST-03"
+            ],
+            "note": "отрицание с условием",
+            "hits": []
+          },
+          {
+            "anchor": "Д-22",
+            "rules": [
+              "CTR-01",
+              "CTR-02"
+            ],
+            "note": "разные условия: рабочее и ночное время",
+            "hits": []
+          },
+          {
+            "anchor": "Н-2",
+            "rules": [
+              "TST-05"
+            ],
+            "note": "нагрузка указана числом",
+            "hits": []
+          }
+        ],
+        "contradictions": [
+          {
+            "anchor": "Д-20",
+            "pair": "Д-21",
+            "expected": "confirmed",
+            "observed": [
+              "confirmed"
+            ],
+            "ok": true,
+            "note": "1 день и 48 часов"
+          },
+          {
+            "anchor": "quote:Доставка по городу",
+            "pair": null,
+            "expected": "confirmed",
+            "observed": [],
+            "ok": false,
+            "note": "1 500 ₸ и 2 000 ₸"
+          }
+        ],
+        "semantic": [
+          {
+            "anchor": "Д-24",
+            "category": "missing_condition",
+            "note": "не сказано, когда и каким каналом",
+            "flagged_by_rules": []
+          }
+        ],
+        "related_pairs": [
+          {
+            "pair": [
+              "Д-9",
+              "Д-10"
+            ],
+            "candidate": true,
+            "linked": false
+          },
+          {
+            "pair": [
+              "Д-20",
+              "Д-21"
+            ],
+            "candidate": true,
+            "linked": false
+          }
+        ],
+        "candidates": 15,
+        "verdict": {
+          "expected": "not_recommended",
+          "observed": "not_recommended"
+        }
+      }
+    ],
+    "splits": {
+      "dev": {
+        "documents": [
+          "library.md",
+          "rooms.md"
+        ],
+        "requirements": 58,
+        "expected": 30,
+        "per_rule": {
+          "ACC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-06": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-07": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CON-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CON-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CTR-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CTR-02": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-06": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-01": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-02": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-05": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          }
+        },
+        "micro": {
+          "tp": 30,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "macro": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "rules_with_precision": 28,
+          "rules_with_recall": 28
+        },
+        "traps": {
+          "total": 13,
+          "passed": 13
+        },
+        "contradictions": {
+          "total": 2,
+          "ok": 2
+        },
+        "related_pairs": {
+          "total": 4,
+          "found": 2
+        },
+        "verdicts": {
+          "total": 2,
+          "ok": 2
+        }
+      },
+      "test": {
+        "documents": [
+          "fitness.md",
+          "flowers.md"
+        ],
+        "requirements": 62,
+        "expected": 37,
+        "per_rule": {
+          "ACC-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-01": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-02": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-03": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-04": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "AMB-05": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-01": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-02": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-03": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CMP-06": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CON-03": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CTR-01": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "CTR-02": {
+            "tp": 3,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-01": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TRC-03": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-01": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 1,
+            "precision": 1.0,
+            "recall": 0.5
+          },
+          "TST-02": {
+            "tp": 2,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-03": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-04": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "TST-05": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "precision": null,
+            "recall": 0.0
+          }
+        },
+        "micro": {
+          "tp": 34,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "recall": 0.918918918918919
+        },
+        "macro": {
+          "precision": 1.0,
+          "recall": 0.925,
+          "rules_with_precision": 19,
+          "rules_with_recall": 20
+        },
+        "traps": {
+          "total": 13,
+          "passed": 13
+        },
+        "contradictions": {
+          "total": 4,
+          "ok": 3
+        },
+        "related_pairs": {
+          "total": 4,
+          "found": 4
+        },
+        "verdicts": {
+          "total": 2,
+          "ok": 2
+        }
+      }
+    }
+  },
+  "formats": [
+    {
+      "document": "library.md",
+      "format": "md",
+      "requirements": 37,
+      "findings": 19,
+      "labels_lost_in_format": 0,
+      "tp": 18,
+      "fn": 0,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "library.md",
+      "format": "docx",
+      "requirements": 37,
+      "findings": 19,
+      "labels_lost_in_format": 0,
+      "tp": 18,
+      "fn": 0,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "library.md",
+      "format": "pdf",
+      "requirements": 37,
+      "findings": 19,
+      "labels_lost_in_format": 0,
+      "tp": 18,
+      "fn": 0,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "library.md",
+      "format": "txt",
+      "requirements": 33,
+      "findings": 17,
+      "labels_lost_in_format": 2,
+      "tp": 16,
+      "fn": 2,
+      "fp": 0,
+      "same_findings_as_md": false,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "rooms.md",
+      "format": "md",
+      "requirements": 21,
+      "findings": 11,
+      "labels_lost_in_format": 0,
+      "tp": 11,
+      "fn": 0,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "rooms.md",
+      "format": "docx",
+      "requirements": 21,
+      "findings": 11,
+      "labels_lost_in_format": 0,
+      "tp": 11,
+      "fn": 0,
+      "fp": 0,
+      "same_findings_as_md": false,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "rooms.md",
+      "format": "pdf",
+      "requirements": 21,
+      "findings": 11,
+      "labels_lost_in_format": 0,
+      "tp": 11,
+      "fn": 0,
+      "fp": 0,
+      "same_findings_as_md": false,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "rooms.md",
+      "format": "txt",
+      "requirements": 21,
+      "findings": 10,
+      "labels_lost_in_format": 1,
+      "tp": 10,
+      "fn": 1,
+      "fp": 0,
+      "same_findings_as_md": false,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "fitness.md",
+      "format": "md",
+      "requirements": 32,
+      "findings": 15,
+      "labels_lost_in_format": 0,
+      "tp": 15,
+      "fn": 2,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "fitness.md",
+      "format": "docx",
+      "requirements": 32,
+      "findings": 15,
+      "labels_lost_in_format": 0,
+      "tp": 15,
+      "fn": 2,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "fitness.md",
+      "format": "pdf",
+      "requirements": 32,
+      "findings": 15,
+      "labels_lost_in_format": 0,
+      "tp": 15,
+      "fn": 2,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "fitness.md",
+      "format": "txt",
+      "requirements": 28,
+      "findings": 13,
+      "labels_lost_in_format": 2,
+      "tp": 13,
+      "fn": 4,
+      "fp": 0,
+      "same_findings_as_md": false,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "flowers.md",
+      "format": "md",
+      "requirements": 30,
+      "findings": 19,
+      "labels_lost_in_format": 0,
+      "tp": 19,
+      "fn": 1,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "flowers.md",
+      "format": "docx",
+      "requirements": 30,
+      "findings": 19,
+      "labels_lost_in_format": 0,
+      "tp": 19,
+      "fn": 1,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "flowers.md",
+      "format": "pdf",
+      "requirements": 30,
+      "findings": 19,
+      "labels_lost_in_format": 0,
+      "tp": 19,
+      "fn": 1,
+      "fp": 0,
+      "same_findings_as_md": true,
+      "verdict": "not_recommended"
+    },
+    {
+      "document": "flowers.md",
+      "format": "txt",
+      "requirements": 30,
+      "findings": 17,
+      "labels_lost_in_format": 2,
+      "tp": 17,
+      "fn": 3,
+      "fp": 0,
+      "same_findings_as_md": false,
+      "verdict": "not_recommended"
+    }
+  ],
+  "stability": [
+    {
+      "document": "library.md",
+      "repeat_identical": true,
+      "hash_seeds_identical": true,
+      "permutation_same_findings": false,
+      "permutation_same_verdict": true
+    },
+    {
+      "document": "rooms.md",
+      "repeat_identical": true,
+      "hash_seeds_identical": true,
+      "permutation_same_findings": false,
+      "permutation_same_verdict": true
+    },
+    {
+      "document": "fitness.md",
+      "repeat_identical": true,
+      "hash_seeds_identical": true,
+      "permutation_same_findings": true,
+      "permutation_same_verdict": true
+    },
+    {
+      "document": "flowers.md",
+      "repeat_identical": true,
+      "hash_seeds_identical": true,
+      "permutation_same_findings": false,
+      "permutation_same_verdict": true
+    }
+  ],
+  "performance": [
+    {
+      "requirements": 50,
+      "adversarial": false,
+      "seconds_total": 0.06,
+      "seconds_by_stage": {
+        "чтение": 0.01,
+        "сегментация": 0.04,
+        "правила": 0.01,
+        "граф": 0.01,
+        "этап 8": 0.0,
+        "оценка": 0.0
+      },
+      "peak_mb": 0.3,
+      "candidates": 0,
+      "candidates_found": 0
+    },
+    {
+      "requirements": 200,
+      "adversarial": false,
+      "seconds_total": 0.68,
+      "seconds_by_stage": {
+        "чтение": 0.02,
+        "сегментация": 0.59,
+        "правила": 0.04,
+        "граф": 0.02,
+        "этап 8": 0.01,
+        "оценка": 0.0
+      },
+      "peak_mb": 1.3,
+      "candidates": 3,
+      "candidates_found": 3
+    },
+    {
+      "requirements": 200,
+      "adversarial": true,
+      "seconds_total": 0.76,
+      "seconds_by_stage": {
+        "чтение": 0.02,
+        "сегментация": 0.66,
+        "правила": 0.04,
+        "граф": 0.03,
+        "этап 8": 0.01,
+        "оценка": 0.0
+      },
+      "peak_mb": 1.4,
+      "candidates": 1000,
+      "candidates_found": 4853
+    }
+  ],
+  "api": [
+    {
+      "scenario": "таймаут",
+      "exit_code": 4,
+      "report_written": false,
+      "key_leaked": false,
+      "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: таймаут. До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных требований в документе: 37); "
+    },
+    {
+      "scenario": "429 с Retry-After (1 повтор)",
+      "exit_code": 4,
+      "report_written": false,
+      "key_leaked": false,
+      "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: превышен лимит запросов (HTTP 429). До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных тр"
+    },
+    {
+      "scenario": "HTTP 503",
+      "exit_code": 4,
+      "report_written": false,
+      "key_leaked": false,
+      "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: сбой на стороне провайдера (HTTP 5xx). До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных"
+    },
+    {
+      "scenario": "ответ не JSON",
+      "exit_code": 4,
+      "report_written": false,
+      "key_leaked": false,
+      "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: непригодный ответ модели. До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных требований в"
+    },
+    {
+      "scenario": "пустой ответ",
+      "exit_code": 4,
+      "report_written": false,
+      "key_leaked": false,
+      "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: непригодный ответ модели. До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных требований в"
+    },
+    {
+      "scenario": "ключ в теле ошибки 500",
+      "exit_code": 4,
+      "report_written": false,
+      "key_leaked": false,
+      "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: сбой на стороне провайдера (HTTP 5xx). До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных"
+    },
+    {
+      "scenario": "ключ отклонён (401)",
+      "exit_code": 4,
+      "report_written": false,
+      "key_leaked": false,
+      "message": "Ошибка: LLM-обзор прерван на требовании Ф-1. Тип сбоя: ключ не принят или нет доступа. До сбоя проверено 0 из 10 запланированных в этом обзоре (атомарных требов"
+    }
+  ],
+  "official": null,
+  "llm": {
+    "measured": false,
+    "reason": "модель не вызывалась: нет ключа и разрешения"
+  }
+}

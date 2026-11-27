@@ -2,7 +2,8 @@
 
 Содержательный ID меняется при правке текста (если у требования нет идентификатора документа),
 поэтому сопоставление идёт в три шага, от строгого к мягкому:
-1. одинаковый ID (идентификатор документа или одинаковое содержание);
+1. одинаковый ID — если тексты похожи не меньше ID_SIMILARITY_THRESHOLD: при перенумерации
+   «Ф-2» новой версии может быть другим требованием, и тогда пара ищется дальше;
 2. одинаковое содержание при разных ID (сдвиг суффикса «~2» у дублей);
 3. похожесть нормализованного текста не ниже SIMILARITY_THRESHOLD — «изменено».
 Остальное — «удалено» (было только в старой версии) или «добавлено» (только в новой).
@@ -20,6 +21,9 @@ from validator.segmentation.text import content_key
 
 MatchStatus = Literal["unchanged", "modified", "added", "removed"]
 SIMILARITY_THRESHOLD = 0.75
+# Одинаковый ID подтверждает пару только вместе с похожим текстом (правка — да, другое
+# требование под тем же номером — нет).
+ID_SIMILARITY_THRESHOLD = 0.5
 
 
 @dataclass(frozen=True)
@@ -43,8 +47,11 @@ def match_segmentations(old: Segmentation, new: Segmentation) -> tuple[Requireme
 
     new_by_id = {fragment.id: index for index, fragment in enumerate(news)}
     for i, fragment in enumerate(olds):
-        if fragment.id in new_by_id:
-            pairs[i] = new_by_id[fragment.id]
+        j = new_by_id.get(fragment.id)
+        if j is not None and (
+            similarity(fragment.normalized, news[j].normalized) >= ID_SIMILARITY_THRESHOLD
+        ):
+            pairs[i] = j
 
     taken = set(pairs.values())
     free_by_key: dict[str, list[int]] = {}

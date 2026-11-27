@@ -126,3 +126,39 @@ def test_same_content_in_other_format_matches_fully(tmp_path: Path) -> None:
     docx = segment_document(load_document(write_docx(tmp_path / "a.docx", SAMPLE)))
 
     assert {m.status for m in match_segmentations(md, docx)} == {"unchanged"}
+
+
+def test_renumbered_document_ids_do_not_pair_different_requirements(tmp_path: Path) -> None:
+    """Перенумерация: «Ф-2» в новой версии — другое требование; пары ищутся по содержанию."""
+    head = "# Сервис\n\n## Функциональные требования\n\n"
+    old = segment_markdown(
+        tmp_path,
+        head + "* Ф-1. Читатель бронирует книгу.\n* Ф-2. Библиотекарь выдаёт книгу читателю.\n",
+        "old.md",
+    )
+    new = segment_markdown(
+        tmp_path,
+        head
+        + "* Ф-1. Курьер доставляет посылку адресату.\n"
+        + "* Ф-2. Читатель бронирует книгу.\n"
+        + "* Ф-3. Библиотекарь выдаёт книгу читателю.\n",
+        "new.md",
+    )
+
+    pairs = {(m.old_id, m.new_id): m.status for m in match_segmentations(old, new)}
+
+    assert pairs[("Ф-1", "Ф-2")] == "unchanged"
+    assert pairs[("Ф-2", "Ф-3")] == "unchanged"
+    assert pairs[(None, "Ф-1")] == "added"
+
+
+def test_same_document_id_with_edited_text_is_still_modified(tmp_path: Path) -> None:
+    head = "# Сервис\n\n## Функциональные требования\n\n"
+    old = segment_markdown(tmp_path, head + "* Ф-1. Читатель бронирует книгу в каталоге.\n", "o.md")
+    new = segment_markdown(
+        tmp_path, head + "* Ф-1. Читатель бронирует книгу в электронном каталоге.\n", "n.md"
+    )
+
+    [match] = match_segmentations(old, new)
+
+    assert (match.old_id, match.new_id, match.status) == ("Ф-1", "Ф-1", "modified")
