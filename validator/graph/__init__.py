@@ -7,8 +7,15 @@
 """
 
 from validator.graph.build import GRAPH_RULES, XRF_01, build_fact_graph, graph_nodes
-from validator.graph.candidates import content_stems, select_candidates
+from validator.graph.candidates import (
+    CandidateInput,
+    content_words,
+    lexemes,
+    rank_candidates,
+    select_candidates,
+)
 from validator.graph.model import (
+    MAX_CANDIDATES,
     CandidatePair,
     CandidateSelection,
     ExcludedRequirement,
@@ -21,7 +28,9 @@ from validator.graph.model import (
 
 __all__ = [
     "GRAPH_RULES",
+    "MAX_CANDIDATES",
     "XRF_01",
+    "CandidateInput",
     "CandidatePair",
     "CandidateSelection",
     "ExcludedRequirement",
@@ -30,8 +39,10 @@ __all__ = [
     "GraphGap",
     "GraphNode",
     "build_fact_graph",
-    "content_stems",
+    "content_words",
     "edge_key",
     "graph_nodes",
+    "lexemes",
+    "rank_candidates",
     "select_candidates",
 ]

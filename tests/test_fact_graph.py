@@ -16,7 +16,7 @@ import pytest
 from tests.graph_helpers import GRAPH_SPEC, load, relation_finding
 from tests.lint_helpers import HEAD
 from validator.graph import FactGraph, GraphEdge, graph_nodes
-from validator.graph.candidates import content_stems
+from validator.graph.candidates import content_words
 
 TABLE = (
     "## Параметры брони\n\n"
@@ -149,7 +149,7 @@ def test_candidates_are_ranked_by_shared_meaningful_stems(tmp_path: Path) -> Non
 
     first = selection.pairs[0]
     assert (first.source_id, first.target_id) == ("Ф-3", "Ф-4")
-    assert {"брон", "книг", "хран"} <= set(first.shared)
+    assert {"бронь", "книги", "хранит"} <= set(first.shared)
     nodes = len(graph.nodes)
     assert selection.possible_pairs == nodes * (nodes - 1) // 2
     assert 0 < len(selection.pairs) <= selection.evaluated_pairs < selection.possible_pairs
@@ -166,12 +166,12 @@ def test_shared_number_alone_does_not_make_a_candidate(tmp_path: Path) -> None:
 def test_stems_ignore_ids_numbers_negations_and_modal_words(tmp_path: Path) -> None:
     built = load(tmp_path)
 
-    stems = content_stems(built.segmentation.by_id("Ф-3"), built.document)
+    stems = content_words(built.segmentation.by_id("Ф-3"), built.document)
 
-    assert "брон" in stems and "хран" in stems
+    assert "бронь" in stems and "хранит" in stems
     assert not {"не", "3", "ф"} & stems
-    modal = content_stems(built.segmentation.by_id("Ф-2"), built.document)
-    assert "соглас" not in modal and not any(stem.startswith("ф-") for stem in modal)
+    modal = content_words(built.segmentation.by_id("Ф-2"), built.document)
+    assert "согласно" not in modal and not any(stem.startswith("ф-") for stem in modal)
 
 
 def test_each_unordered_pair_is_a_candidate_once(tmp_path: Path) -> None:
@@ -206,7 +206,7 @@ def test_too_common_stems_do_not_link_everything(tmp_path: Path) -> None:
     ]
     graph = load(tmp_path, HEAD + "\n".join(lines) + "\n").graph
 
-    assert "систем" in graph.candidates.common_stems
+    assert "система" in graph.candidates.common_stems
     assert graph.candidates.pairs == ()
 
 

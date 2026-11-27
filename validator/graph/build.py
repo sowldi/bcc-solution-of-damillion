@@ -21,6 +21,7 @@ from validator.evidence import TrustedRule, build_evidence, gate_findings
 from validator.findings import Evidence, Finding
 from validator.graph.candidates import select_candidates
 from validator.graph.model import (
+    MAX_CANDIDATES,
     ExcludedRequirement,
     FactGraph,
     GraphEdge,
@@ -66,7 +67,11 @@ def graph_nodes(
 
 
 def build_fact_graph(
-    document: Document, segmentation: Segmentation, lint: LintResult | None = None
+    document: Document,
+    segmentation: Segmentation,
+    lint: LintResult | None = None,
+    *,
+    max_candidates: int = MAX_CANDIDATES,
 ) -> FactGraph:
     nodes, excluded = graph_nodes(segmentation, document)
     members = {node.requirement_id: segmentation.by_id(node.requirement_id) for node in nodes}
@@ -88,7 +93,9 @@ def build_fact_graph(
         excluded=excluded,
         gaps=tuple(gaps),
         rejected=gate.rejected,
-        candidates=select_candidates(list(members.values()), document, linked),
+        candidates=select_candidates(
+            list(members.values()), document, linked, limit=max_candidates
+        ),
         requirements_total=len(segmentation.atomic_requirements),
     )
 

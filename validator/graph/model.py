@@ -29,6 +29,9 @@ from validator.segmentation import SourceRef
 from validator.segmentation.model import source_ref_to_dict
 
 SCHEMA = "validator.fact-graph/1"
+# Ограничение отбора пар-кандидатов (этап 7.1): в 10 раз больше наибольшего бюджета модели
+# (LLM_MAX_PAIR_REQUESTS <= 100); память отбора — O(n + MAX_CANDIDATES).
+MAX_CANDIDATES = 1000
 
 ExcludeCode = Literal["empty", "no_source"]
 GapKind = Literal[
@@ -207,18 +210,45 @@ class CandidateSelection:
     """Отбор пар-кандидатов: что отобрано, сколько оценено и что исключено и почему."""
 
     possible_pairs: int = 0  # n(n-1)/2 — перебор всех пар не выполняется
-    evaluated_pairs: int = 0  # пары с хотя бы одной общей значимой основой (из индекса)
-    pairs: tuple[CandidatePair, ...] = ()  # по убыванию оценки, затем по порядку документа
-    duplicates: tuple[tuple[str, str], ...] = ()  # дословные повторы — не сравниваются
+    evaluated_pairs: int = 0  # пары с хотя бы одним общим значимым словом (из индекса)
+    pairs: tuple[CandidatePair, ...] = ()  # лучшие по оценке, не больше limit
+    duplicates: tuple[tuple[str, str], ...] = ()  # дословные повторы (первые limit)
     linked: tuple[tuple[str, str], ...] = ()  # уже связаны подтверждённой связью
-    common_stems: tuple[str, ...] = ()  # слишком общие основы — не учитывались
+    common_stems: tuple[str, ...] = ()  # слишком общие слова — не учитывались
     min_shared: int = 2
+    found: int = 0  # кандидатов до ограничения (точно, в том же проходе)
+    limit: int = MAX_CANDIDATES  # ограничение отбора
+    duplicate_count: int = 0  # дословных повторов всего
+
+    def __post_init__(self) -> None:
+        if len(self.pairs) > self.limit:
+            raise ValueError("В отборе больше пар, чем позволяет ограничение отбора.")
+        if len(self.pairs) > self.found:
+            raise ValueError("В отборе больше пар, чем найдено кандидатов.")
+
+    @property
+    def truncated(self) -> bool:
+        """Часть найденных кандидатов исключена ограничением отбора."""
+        return self.found > len(self.pairs)
+
+    @property
+    def excluded_by_limit(self) -> int:
+        return self.found - len(self.pairs)
+
+    @property
+    def outside_pairs(self) -> int:
+        """Пары меньше чем с MIN_SHARED общими словами: в отбор не попали, моделью не
+        проверяются."""
+        return self.possible_pairs - self.found - self.duplicate_count - len(self.linked)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "possible_pairs": self.possible_pairs,
             "evaluated_pairs": self.evaluated_pairs,
             "min_shared": self.min_shared,
+            "found": self.found,
+            "limit": self.limit,
+            "duplicate_count": self.duplicate_count,
             "common_stems": list(self.common_stems),
             "duplicates": [list(pair) for pair in self.duplicates],
             "linked": [list(pair) for pair in self.linked],

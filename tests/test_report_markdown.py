@@ -416,9 +416,18 @@ CONFLICT = relation(
 
 
 def _section6(
-    tmp_path: Path, *replies: str, max_pair_requests: int = 10, rules_only: bool = False
+    tmp_path: Path,
+    *replies: str,
+    max_pair_requests: int = 10,
+    rules_only: bool = False,
+    max_candidates: int | None = None,
 ) -> str:
     built = load(tmp_path)
+    if max_candidates is not None:
+        graph = build_fact_graph(
+            built.document, built.segmentation, built.lint, max_candidates=max_candidates
+        )
+        built = replace(built, graph=graph)
     passport = _passport(NOON)
     crosscheck = None
     if rules_only:
@@ -473,7 +482,7 @@ def test_graph_section_explains_selection_budget_and_coverage(tmp_path: Path) ->
     section = _section6(tmp_path, max_pair_requests=2)
 
     assert "- Возможных пар: 36 — полный перебор не выполняется." in section
-    assert f"- Пар-кандидатов (общих основ не меньше 2): {total}." in section
+    assert f"- Пар-кандидатов (общих значимых слов не меньше 2): {total}." in section
     assert "одинаковые числа пару не образуют" in section
     assert "уже связаны подтверждённой связью — 1" in section
     assert f"- Проверено моделью: 2 из {total} (лимит LLM_MAX_PAIR_REQUESTS = 2)." in section
@@ -514,3 +523,74 @@ def test_empty_graph_section(tmp_path: Path) -> None:
     text = render_report(_passport(NOON), document, segmentation, lint, graph=graph)
 
     assert "Узлов нет: в документе не найдено атомарных требований" in text
+
+
+# --- раздел 6: формулировки и ограничение отбора (этап 7.1) --------------------------------
+
+
+def test_hypothesis_relation_type_is_worded_as_an_assumption(tmp_path: Path) -> None:
+    section = _section6(tmp_path, relations_json(CONFLICT))
+
+    assert "- Предполагаемый тип связи: conflicts_with — возможное противоречие" in section
+    assert "- Тип связи:" not in section
+    assert "- Статус: не подтверждено" in section
+
+
+def test_stages_of_the_pair_check_are_reported_separately(tmp_path: Path) -> None:
+    section = _section6(tmp_path, relations_json(CONFLICT))
+
+    assert "- Пар-кандидатов (общих значимых слов не меньше 2): 6." in section
+    assert "- Проверено моделью: 6 из 6 (лимит LLM_MAX_PAIR_REQUESTS = 10)." in section
+    assert (
+        "- Гипотезы модели: прошли проверку цитат (Evidence Gate) — 1, отклонены — 0; "
+        "сама связь не проверена." in section
+    )
+    assert "- Пары вне отбора (общих значимых слов меньше 2): 29 — моделью не проверялись." in (
+        section
+    )
+    assert "Пропусков нет" not in section
+    assert "все пары" not in section.casefold()
+
+
+def test_truncated_candidates_are_counted_and_never_reported_as_checked(tmp_path: Path) -> None:
+    section = _section6(tmp_path, max_pair_requests=1, max_candidates=2)
+
+    assert (
+        "- Пар-кандидатов (общих значимых слов не меньше 2): найдено 6, оставлено 2 лучших по "
+        "оценке — ограничение отбора 2 пар; исключено ограничением: 4, моделью они не "
+        "проверялись." in section
+    )
+    assert "- Проверено моделью: 1 из 2 (лимит LLM_MAX_PAIR_REQUESTS = 1)." in section
+    assert (
+        "- Пары-кандидаты, исключённые ограничением отбора: 4 — не перечислены поимённо, "
+        "моделью не проверялись." in section
+    )
+    assert "- Пары-кандидаты, не проверенные моделью: 1 — `Ф-1`–`Ф-4`" in section
+
+
+def test_zero_candidates_report_is_honest(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n"
+        "* Ф-1. Читатель бронирует книгу.\n* Ф-2. Курьер доставляет посылку.\n",
+    )
+    graph = build_fact_graph(document, segmentation, lint)
+    crosscheck = crosscheck_pairs(
+        document, segmentation, graph, FakeProvider(), LLMOptions(max_retries=0)
+    )
+
+    text = render_report(
+        _passport(NOON), document, segmentation, lint, graph=graph, crosscheck=crosscheck
+    )
+
+    assert "- Пар-кандидатов (общих значимых слов не меньше 2): 0." in text
+    assert "- Пары вне отбора (общих значимых слов меньше 2): 1 — моделью не проверялись." in text
+    assert "Пропусков нет" not in text
+
+
+def test_disabled_budget_lists_every_unchecked_pair(tmp_path: Path) -> None:
+    section = _section6(tmp_path, max_pair_requests=0)
+
+    assert "- Проверка пар моделью отключена (LLM_MAX_PAIR_REQUESTS = 0)." in section
+    assert "- Пары-кандидаты, не проверенные моделью: 6 —" in section
+    assert "- Пары вне отбора (общих значимых слов меньше 2): 29" in section

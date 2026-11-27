@@ -103,7 +103,9 @@ class StubServer:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(reply.body)))
                 self.end_headers()
-                with suppress(BrokenPipeError, ConnectionResetError):  # клиент ушёл по таймауту
+                # Клиент ушёл по таймауту: на Windows это ConnectionAbortedError (WinError
+                # 10053). Таймаут проверяется на стороне клиента — здесь только тишина в логе.
+                with suppress(BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     self.wfile.write(reply.body)
 
             def log_message(self, format: str, *args: Any) -> None:

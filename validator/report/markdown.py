@@ -409,6 +409,13 @@ def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | N
 
 
 _LIST_LIMIT = 10  # сколько пар и основ показывать в списке
+# Тип связи в гипотезе — предположение модели, а не установленный факт.
+_ASSUMED_RELATIONS: dict[str, str] = {
+    "depends_on": "возможная зависимость",
+    "conflicts_with": "возможное противоречие",
+    "related_to": "возможная связь",
+    "requires_condition": "возможное условие выполнения",
+}
 _EXCLUDE_TITLES: dict[str, str] = {
     "empty": "пустой текст",
     "no_source": "нет корректной привязки к источнику",
@@ -455,7 +462,7 @@ def _relation_hypothesis_block(number: int, finding: Finding) -> str:
         "",
         f"- Цитата `{source.requirement_id}`: {_quote(source.quote)} — {_where(source)}",
         f"- Цитата `{target.requirement_id}`: {_quote(target.quote)} — {_where(target)}",
-        f"- Тип связи: {relation} — {RELATION_TITLES[relation]}",
+        f"- Предполагаемый тип связи: {relation} — {_ASSUMED_RELATIONS[relation]}",
         f"- Предполагаемая важность: {SEVERITY_TITLES[finding.severity]} (по типу связи)",
         f"- Обоснование модели: {_escape(finding.explanation)}",
         f"- Рекомендация модели: {_escape(finding.recommendation)}",
@@ -482,11 +489,18 @@ def _selection_lines(
     passport: RunPassport, graph: FactGraph, crosscheck: CrossCheckAnalysis | None
 ) -> list[str]:
     selection = graph.candidates
+    found = str(selection.found)
+    if selection.truncated:
+        found = (
+            f"найдено {selection.found}, оставлено {len(selection.pairs)} лучших по оценке — "
+            f"ограничение отбора {selection.limit} пар; исключено ограничением: "
+            f"{selection.excluded_by_limit}, моделью они не проверялись"
+        )
     lines = [
         f"- Возможных пар: {selection.possible_pairs} — полный перебор не выполняется.",
-        f"- Оценено пар (есть общая значимая основа слова): {selection.evaluated_pairs}.",
-        f"- Пар-кандидатов (общих основ не меньше {selection.min_shared}): "
-        f"{len(selection.pairs)}. Учитываются основы слов из 4 и более букв; числа, ID, "
+        f"- Оценено пар (есть общее значимое слово): {selection.evaluated_pairs}.",
+        f"- Пар-кандидатов (общих значимых слов не меньше {selection.min_shared}): {found}. "
+        "Учитываются слова из 4 и более букв, формы одного слова объединяются; числа, ID, "
         "отрицания, служебные и модальные слова не учитываются — одинаковые числа пару "
         "не образуют.",
     ]
@@ -494,12 +508,12 @@ def _selection_lines(
         stems = ", ".join(selection.common_stems[:_LIST_LIMIT])
         more = " …" if len(selection.common_stems) > _LIST_LIMIT else ""
         lines.append(
-            "- Слишком общие основы (больше чем у половины требований) не учитывались: "
+            "- Слишком общие слова (больше чем у половины требований) не учитывались: "
             f"{_escape(stems)}{more}."
         )
     excluded = []
-    if selection.duplicates:
-        excluded.append(f"дословные повторы — {len(selection.duplicates)}")
+    if selection.duplicate_count:
+        excluded.append(f"дословные повторы — {selection.duplicate_count}")
     if selection.linked:
         excluded.append(f"уже связаны подтверждённой связью — {len(selection.linked)}")
     if excluded:
@@ -513,6 +527,9 @@ def _selection_lines(
         lines += [
             f"- Проверено моделью: {crosscheck.requests} из {crosscheck.candidates_total} "
             f"(лимит LLM_MAX_PAIR_REQUESTS = {crosscheck.budget}).",
+            "- Гипотезы модели: прошли проверку цитат (Evidence Gate) — "
+            f"{len(crosscheck.hypotheses)}, отклонены — {len(crosscheck.rejected)}; сама "
+            "связь не проверена.",
             "- Покрытие: требований хотя бы в одной проверенной паре — "
             f"{len(crosscheck.covered)} из {len(graph.nodes)}.",
         ]
@@ -539,6 +556,17 @@ def _gap_lines(graph: FactGraph, crosscheck: CrossCheckAnalysis | None) -> list[
     if unchecked:
         lines.append(
             f"- Пары-кандидаты, не проверенные моделью: {len(unchecked)} — {_pairs(unchecked)}"
+        )
+    selection = graph.candidates
+    if selection.truncated:
+        lines.append(
+            "- Пары-кандидаты, исключённые ограничением отбора: "
+            f"{selection.excluded_by_limit} — не перечислены поимённо, моделью не проверялись."
+        )
+    if selection.outside_pairs > 0:
+        lines.append(
+            f"- Пары вне отбора (общих значимых слов меньше {selection.min_shared}): "
+            f"{selection.outside_pairs} — моделью не проверялись."
         )
     if crosscheck is not None and not crosscheck.disabled:
         covered = set(crosscheck.covered)
@@ -647,7 +675,8 @@ def _graph_section(
         "### Пропуски",
         "\n".join(gaps)
         if gaps
-        else "Пропусков нет: все ссылки сведены к связям, все пары-кандидаты проверены.",
+        else "Непроверенных пар и ссылок без связи нет: каждая возможная пара — кандидат, "
+        "проверенный моделью, дословный повтор или уже подтверждённая связь.",
     ]
     return "\n\n".join(parts)
 

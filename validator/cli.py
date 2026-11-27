@@ -138,14 +138,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _print_graph(graph: FactGraph, crosscheck: CrossCheckAnalysis | None) -> None:
+    selection = graph.candidates
+    kept = str(len(selection.pairs))
+    if selection.truncated:
+        kept += f" (найдено {selection.found}, ограничение отбора {selection.limit})"
     line = f"Связей: подтверждено {len(graph.edges)}"
     if crosscheck is not None:
         line += (
             f", гипотез LLM {len(crosscheck.hypotheses)} (не подтверждены); пар-кандидатов "
-            f"{crosscheck.candidates_total}, проверено моделью {crosscheck.requests}."
+            f"{kept}, проверено моделью {crosscheck.requests}."
         )
     else:
-        line += f"; пар-кандидатов {len(graph.candidates.pairs)} (моделью не проверялись)."
+        line += f"; пар-кандидатов {kept} (моделью не проверялись)."
     print(line)
 
 
