@@ -1,10 +1,11 @@
-"""Строгая схема ответа модели.
+"""Строгая схема ответа модели на обзор одного требования (промпт версии 2).
 
 Ответ целиком: один JSON-объект {"findings": [...]} без других полей (допускается обёртка
 целиком в один блок ```json … ```). Нарушение — ProviderResponseError: ответ непригоден.
-Каждый элемент проверяется отдельно: все поля обязательны, других полей нет, типы, допустимые
-значения и длины — по схеме. Неверный элемент отклоняется с причинами, а не «чинится»
-(обрезкой, сменой регистра, подстановкой значения).
+Элемент: ровно поля requirement_id, category, issue, evidence_quote, reasoning,
+recommendation, confidence. Типы, допустимые значения и длины проверяются; неверный элемент
+отклоняется с причинами, а не «чинится» (обрезкой, сменой регистра, подстановкой значения).
+Важность, критерий, статус и происхождение модель не задаёт: такие поля — недопустимые.
 """
 
 from __future__ import annotations
@@ -14,46 +15,38 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from validator.criteria import CRITERIA
-from validator.findings import RULE_CATEGORIES, SEVERITIES, RuleCategory, Severity
+from validator.findings import REVIEW_CATEGORIES, ReviewCategory, is_probability
 from validator.llm.errors import ProviderResponseError
 
-MAX_ITEMS = 50
-# Поле → наибольшая длина (None — значение из перечня).
-FIELDS: dict[str, int | None] = {
+MAX_ITEMS = 10  # замечаний к одному требованию
+# Текстовое поле → наибольшая длина (None — значение из перечня).
+TEXT_FIELDS: dict[str, int | None] = {
     "requirement_id": 64,
     "category": None,
-    "severity": None,
-    "criterion": None,
-    "title": 150,
-    "explanation": 1000,
+    "issue": 150,
+    "evidence_quote": 500,
+    "reasoning": 1000,
     "recommendation": 500,
-    "quote": 500,
 }
-_ALLOWED: dict[str, frozenset[str]] = {
-    "category": frozenset(RULE_CATEGORIES),
-    "severity": frozenset(SEVERITIES),
-    "criterion": frozenset(CRITERIA),
-}
+FIELDS = (*TEXT_FIELDS, "confidence")
 _FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n(?P<body>.*)\n\s*```\s*\Z", re.DOTALL)
 
 
 @dataclass(frozen=True)
 class Hypothesis:
-    """Гипотеза модели о дефекте — не замечание и не доказательство.
+    """Гипотеза модели о дефекте одного требования — не замечание и не доказательство.
 
     index — номер элемента в списке findings ответа модели.
     """
 
     index: int
     requirement_id: str
-    category: RuleCategory
-    severity: Severity
-    criterion: str
-    title: str
-    explanation: str
+    category: ReviewCategory
+    issue: str
+    evidence_quote: str
+    reasoning: str
     recommendation: str
-    quote: str
+    confidence: float
 
 
 @dataclass(frozen=True)
@@ -114,7 +107,8 @@ def parse_hypotheses(text: str) -> ParsedAnswer:
         raise ProviderResponseError("Поле findings в ответе модели: ожидается список замечаний.")
     if len(items) > MAX_ITEMS:
         raise ProviderResponseError(
-            f"Модель вернула {len(items)} замечаний — больше допустимых {MAX_ITEMS}."
+            f"Модель вернула {len(items)} замечаний к одному требованию — больше допустимых "
+            f"{MAX_ITEMS}."
         )
     hypotheses: list[Hypothesis] = []
     rejected: list[RejectedHypothesis] = []
@@ -126,7 +120,18 @@ def parse_hypotheses(text: str) -> ParsedAnswer:
                 RejectedHypothesis(index, rid if isinstance(rid, str) else None, tuple(reasons))
             )
         else:
-            hypotheses.append(Hypothesis(index=index, **item))
+            hypotheses.append(
+                Hypothesis(
+                    index=index,
+                    requirement_id=item["requirement_id"],
+                    category=item["category"],
+                    issue=item["issue"],
+                    evidence_quote=item["evidence_quote"],
+                    reasoning=item["reasoning"],
+                    recommendation=item["recommendation"],
+                    confidence=float(item["confidence"]),
+                )
+            )
     return ParsedAnswer(tuple(hypotheses), tuple(rejected))
 
 
@@ -134,7 +139,7 @@ def _item_problems(item: Any) -> list[str]:
     if not isinstance(item, dict):
         return ["Элемент findings должен быть объектом."]
     problems = [f"Недопустимое поле {key}." for key in sorted(set(item) - set(FIELDS))]
-    for key, limit in FIELDS.items():
+    for key, limit in TEXT_FIELDS.items():
         if key not in item:
             problems.append(f"Нет поля {key}.")
             continue
@@ -145,6 +150,10 @@ def _item_problems(item: Any) -> list[str]:
             problems.append(f"Поле {key} пусто.")
         elif limit is not None and len(value) > limit:
             problems.append(f"Поле {key} длиннее {limit} символов.")
-        elif key in _ALLOWED and value not in _ALLOWED[key]:
-            problems.append(f"Поле {key}: недопустимое значение «{value[:40]}».")
+        elif key == "category" and value not in REVIEW_CATEGORIES:
+            problems.append(f"Поле category: недопустимое значение «{value[:40]}».")
+    if "confidence" not in item:
+        problems.append("Нет поля confidence.")
+    elif not is_probability(item["confidence"]):
+        problems.append("Поле confidence: ожидается число от 0 до 1.")
     return problems

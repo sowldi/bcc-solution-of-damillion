@@ -17,10 +17,11 @@ def test_valid_answer_is_parsed() -> None:
 
     [item] = parsed.hypotheses
     assert item.requirement_id == "Ф-1"
-    assert item.quote == "в течение дня"
-    assert item.category == "ambiguity"
-    assert item.severity == "major"
-    assert item.criterion == "UNA"
+    assert item.evidence_quote == "в течение дня"
+    assert item.category == "clarity"
+    assert item.issue == "Неоднозначный срок"
+    assert item.reasoning == "Срок не задан в единицах времени."
+    assert item.confidence == 0.7
     assert parsed.rejected == ()
 
 
@@ -74,14 +75,19 @@ def _rejected_reasons(item: Any) -> str:
     ("changes", "reason"),
     [
         ({"requirement_id": ""}, "requirement_id"),
-        ({"quote": ""}, "quote"),
-        ({"quote": 5}, "quote"),
+        ({"evidence_quote": ""}, "evidence_quote"),
+        ({"evidence_quote": 5}, "evidence_quote"),
         ({"category": "style"}, "category"),
-        ({"severity": "blocker"}, "severity"),
-        ({"criterion": "XYZ"}, "criterion"),
-        ({"title": "т" * 151}, "title"),
-        ({"explanation": "о" * 1001}, "explanation"),
-        ({"quote": "ц" * 501}, "quote"),
+        ({"category": "ambiguity"}, "category"),  # группа правил, а не категория обзора
+        ({"issue": "т" * 151}, "issue"),
+        ({"reasoning": "о" * 1001}, "reasoning"),
+        ({"recommendation": "р" * 501}, "recommendation"),
+        ({"evidence_quote": "ц" * 501}, "evidence_quote"),
+        ({"confidence": 1.5}, "confidence"),
+        ({"confidence": -0.1}, "confidence"),
+        ({"confidence": "высокая"}, "confidence"),
+        ({"confidence": True}, "confidence"),
+        ({"severity": "major"}, "severity"),  # важность назначает система, не модель
         ({"evidence_status": "verified"}, "evidence_status"),
     ],
 )
@@ -94,9 +100,9 @@ def test_invalid_item_is_rejected_with_reason(changes: dict[str, Any], reason: s
 
 def test_missing_field_is_rejected() -> None:
     item = hypothesis("Ф-1", "срок")
-    del item["explanation"]
+    del item["reasoning"]
 
-    assert "explanation" in _rejected_reasons(item)
+    assert "reasoning" in _rejected_reasons(item)
 
 
 def test_item_that_is_not_an_object_is_rejected() -> None:
@@ -105,7 +111,7 @@ def test_item_that_is_not_an_object_is_rejected() -> None:
 
 def test_valid_items_survive_next_to_invalid_ones() -> None:
     good = hypothesis("Ф-1", "срок")
-    bad = hypothesis("Ф-2", "срок", severity="blocker")
+    bad = hypothesis("Ф-2", "срок", category="blocker")
 
     parsed = parse_hypotheses(findings_json(good, bad))
 
@@ -116,6 +122,6 @@ def test_valid_items_survive_next_to_invalid_ones() -> None:
 
 def test_values_are_not_silently_repaired() -> None:
     """Неверное значение не «чинится» (обрезкой, приведением регистра) — элемент отклоняется."""
-    parsed = parse_hypotheses(findings_json(hypothesis("Ф-1", "срок", severity="MAJOR")))
+    parsed = parse_hypotheses(findings_json(hypothesis("Ф-1", "срок", category="CLARITY")))
 
     assert parsed.hypotheses == ()

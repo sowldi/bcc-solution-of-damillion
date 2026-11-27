@@ -212,3 +212,24 @@ def test_segmentation_json_is_unchanged_by_shared_source_helpers(tmp_path: Path)
 def test_source_ref_from_dict_rejects_malformed_data(broken: object) -> None:
     with pytest.raises(ValueError):
         source_ref_from_dict(broken)
+
+
+def test_review_fields_round_trip() -> None:
+    finding = _finding(origin="llm", review_category="atomicity", confidence=0.35)
+
+    restored = Finding.from_dict(json.loads(json.dumps(finding.to_dict(), ensure_ascii=False)))
+
+    assert restored == finding
+    assert (restored.review_category, restored.confidence) == ("atomicity", 0.35)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("review_category", "style"), ("confidence", 2), ("confidence", "0.5"), ("confidence", True)],
+)
+def test_from_dict_validates_review_fields(key: str, value: object) -> None:
+    data = _finding(origin="llm").to_dict()
+    data[key] = value
+
+    with pytest.raises(ValueError, match=key):
+        Finding.from_dict(data)

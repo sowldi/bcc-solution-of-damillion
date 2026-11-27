@@ -733,3 +733,27 @@ def test_evidence_with_wrong_requirement_and_offsets_is_rejected(pair: Pair) -> 
     forged = replace(finding, evidence=(*finding.evidence, stranger))
 
     assert "Ф-3" in _reasons(forged, pair)
+
+
+def test_rule_finding_cannot_carry_llm_review_fields(pair: Pair) -> None:
+    seg, document = pair
+    finding = _finding(document, _span(seg, "Ф-1", "каталог"))
+
+    assert "LLM" in _reasons(replace(finding, review_category="clarity"), pair)
+    assert "LLM" in _reasons(replace(finding, confidence=0.9), pair)
+
+
+@pytest.mark.parametrize("confidence", [1.5, -1.0, "0.5", True])
+def test_llm_confidence_must_be_a_probability(pair: Pair, confidence: object) -> None:
+    seg, document = pair
+    hypothesis = _finding(
+        document,
+        _span(seg, "Ф-1", "каталог"),
+        origin="llm",
+        rule_id="LLM",
+        rule_version="prompt-2",
+        review_category="clarity",
+        confidence=cast(Any, confidence),
+    )
+
+    assert _status(hypothesis, pair) == "rejected"

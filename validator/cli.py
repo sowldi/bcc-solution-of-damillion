@@ -134,14 +134,15 @@ def _run_llm(settings: Settings, document: Document, segmentation: Segmentation)
     from validator import llm
 
     provider = llm.create_provider(settings)
+    options = llm.LLMOptions.from_settings(settings)
     host = urlsplit(provider.endpoint).netloc or provider.endpoint
     print(
-        f"LLM: требования ({len(segmentation.atomic_requirements)}) отправляются провайдеру "
-        f"{provider.name} ({provider.model}, {host}).",
+        f"LLM-обзор: требования ({len(segmentation.atomic_requirements)}) проверяются по одному "
+        f"провайдером {provider.name} ({provider.model}, {host}); лимит запросов: "
+        f"{options.max_requests}.",
         file=sys.stderr,
     )
-    options = llm.LLMOptions.from_settings(settings)
-    return llm.analyze_with_llm(document, segmentation, provider, options)
+    return llm.review_requirements(document, segmentation, provider, options)
 
 
 def _force_utf8_console() -> None:

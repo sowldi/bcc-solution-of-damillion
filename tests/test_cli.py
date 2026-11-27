@@ -47,6 +47,7 @@ def offline_llm(monkeypatch: pytest.MonkeyPatch) -> list[FakeProvider]:
         return created[-1]
 
     monkeypatch.setattr("validator.llm.create_provider", factory)
+    monkeypatch.setenv("LLM_RPM", "10000")  # ограничитель частоты не нужен заглушке
     return created
 
 
@@ -57,6 +58,8 @@ def _ollama_env(server: StubServer, **extra: str) -> dict[str, str]:
         "OLLAMA_BASE_URL": server.url,
         "OLLAMA_MODEL": "test-model",
         "LLM_MAX_RETRIES": "0",
+        # По запросу на требование: без высокого лимита частоты тест ждал бы 6 с на запрос.
+        "LLM_RPM": "10000",
         **extra,
     }
 
@@ -311,7 +314,7 @@ def test_standard_mode_runs_rules_and_llm(tmp_path: Path, offline_llm: list[Fake
     assert "| Модель | fake / fake-model |" in text
     assert "## 5. Анализ LLM" in text
     [provider] = offline_llm
-    assert len(provider.requests) == 1
+    assert len(provider.requests) == 2  # по запросу на каждое из двух требований
 
 
 @pytest.mark.parametrize(

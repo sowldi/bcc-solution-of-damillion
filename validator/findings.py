@@ -22,6 +22,17 @@ RuleCategory = Literal["testability", "ambiguity", "completeness", "consistency"
 EvidenceKind = Literal["quote", "absence", "comparison"]
 EvidenceStatus = Literal["unverified", "verified", "rejected"]
 Origin = Literal["rule", "llm"]
+# Категории семантического обзора требования моделью (этап 6). Это вид проблемы, а не
+# группа правил: группа, критерий и важность выводятся системой (validator.llm.review).
+ReviewCategory = Literal[
+    "clarity",
+    "testability",
+    "completeness",
+    "atomicity",
+    "undefined_term",
+    "subjectivity",
+    "missing_condition",
+]
 # Область, в которой утверждается отсутствие, и что именно отсутствует.
 AbsenceScope = Literal["table", "section", "requirement", "id_registry", "heading_registry"]
 ABSENCE_SCOPES: tuple[AbsenceScope, ...] = get_args(AbsenceScope)
@@ -42,6 +53,7 @@ RULE_CATEGORIES: tuple[RuleCategory, ...] = get_args(RuleCategory)
 EVIDENCE_KINDS: tuple[EvidenceKind, ...] = get_args(EvidenceKind)
 EVIDENCE_STATUSES: tuple[EvidenceStatus, ...] = get_args(EvidenceStatus)
 ORIGINS: tuple[Origin, ...] = get_args(Origin)
+REVIEW_CATEGORIES: tuple[ReviewCategory, ...] = get_args(ReviewCategory)
 
 SEVERITY_TITLES: dict[Severity, str] = {
     "critical": "Критичное",
@@ -55,6 +67,15 @@ RULE_CATEGORY_TITLES: dict[RuleCategory, str] = {
     "completeness": "Полнота",
     "consistency": "Согласованность",
     "traceability": "Трассируемость",
+}
+REVIEW_CATEGORY_TITLES: dict[ReviewCategory, str] = {
+    "clarity": "Неясная формулировка",
+    "testability": "Непроверяемость",
+    "completeness": "Неполное поведение",
+    "atomicity": "Неатомарность",
+    "undefined_term": "Неопределённый термин",
+    "subjectivity": "Субъективная оценка",
+    "missing_condition": "Не указано условие",
 }
 EVIDENCE_KIND_TITLES: dict[EvidenceKind, str] = {
     "quote": "цитата с дефектом",
@@ -161,6 +182,11 @@ class Finding:
     origin: Origin = "rule"
     document_sha256: str = ""  # пусто — замечание не привязано к документу и не пройдёт Gate
     absence: AbsenceClaim | None = None
+    # Только для origin="llm": вид проблемы по обзору модели и её собственная оценка
+    # уверенности (0–1). Уверенность — подсказка модели, не доказательство: на статус
+    # Evidence Gate она не влияет.
+    review_category: ReviewCategory | None = None
+    confidence: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -179,6 +205,8 @@ class Finding:
             "evidence_kind": self.evidence_kind,
             "evidence_status": self.evidence_status,
             "absence": self.absence.to_dict() if self.absence else None,
+            "review_category": self.review_category,
+            "confidence": self.confidence,
             "evidence": [item.to_dict() for item in self.evidence],
         }
 
@@ -207,6 +235,13 @@ class Finding:
             absence=AbsenceClaim.from_dict(data["absence"])
             if data.get("absence") is not None
             else None,
+            review_category=cast(
+                ReviewCategory | None,
+                None
+                if data.get("review_category") is None
+                else _choice(data, "review_category", REVIEW_CATEGORIES),
+            ),
+            confidence=_confidence(data),
         )
 
 
@@ -228,6 +263,20 @@ class RejectedFinding:
 
 
 # --- разбор JSON ------------------------------------------------------------------------
+
+
+def _confidence(data: dict[str, Any]) -> float | None:
+    value = data.get("confidence")
+    if value is None:
+        return None
+    if not is_probability(value):
+        raise ValueError(f"Поле confidence: ожидается число от 0 до 1, получено {value!r}")
+    return float(value)
+
+
+def is_probability(value: object) -> bool:
+    """Число от 0 до 1 (bool не считается числом)."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and 0.0 <= value <= 1.0
 
 
 def _str(data: dict[str, Any], key: str) -> str:

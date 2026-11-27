@@ -8,11 +8,13 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from validator.criteria import criterion
 from validator.findings import (
+    REVIEW_CATEGORY_TITLES,
     RULE_CATEGORY_TITLES,
     SEVERITIES,
     SEVERITY_TITLES,
@@ -30,6 +32,14 @@ from validator.segmentation.text import parse_prefix
 
 if TYPE_CHECKING:  # отчёт не загружает LLM-слой: в режиме --rules-only его нет
     from validator.llm import LLMAnalysis
+
+# Причины, по которым требование не отправлено модели (коды validator.llm.analysis).
+_SKIP_TITLES: dict[str, str] = {
+    "budget": "лимит запросов LLM_MAX_REQUESTS",
+    "duplicate": "дословный повтор",
+    "empty": "пустой текст",
+    "no_source": "некорректная привязка к источнику",
+}
 
 _BRIEF_LIMIT = 140
 _SEVERITY_GROUPS: dict[Severity, str] = {
@@ -301,19 +311,24 @@ def _lint_section(lint: LintResult, segmentation: Segmentation | None) -> str:
 def _hypothesis_block(number: int, finding: Finding) -> str:
     item = criterion(finding.criterion)
     evidence = finding.evidence[0]
-    return "\n".join(
-        [
-            f"**5.{number}. {RULE_CATEGORY_TITLES[finding.category]} · {_escape(finding.title)}**",
-            "",
-            f"- Требование: `{evidence.requirement_id}`",
-            f"- Цитата: {_quote(evidence.quote)} — {_where(evidence)}",
-            f"- Предполагаемая важность: {SEVERITY_TITLES[finding.severity]}",
-            f"- Объяснение модели: {_escape(finding.explanation)}",
-            f"- Рекомендация модели: {_escape(finding.recommendation)}",
-            f"- Критерий: {item.reference} — {item.title}",
-            "- Статус: не подтверждено",
-        ]
+    kind = (
+        REVIEW_CATEGORY_TITLES[finding.review_category]
+        if finding.review_category
+        else RULE_CATEGORY_TITLES[finding.category]
     )
+    lines = [
+        f"**5.{number}. {kind} · {_escape(finding.title)}**",
+        "",
+        f"- Требование: `{evidence.requirement_id}`",
+        f"- Цитата: {_quote(evidence.quote)} — {_where(evidence)}",
+        f"- Предполагаемая важность: {SEVERITY_TITLES[finding.severity]} (по категории)",
+        f"- Обоснование модели: {_escape(finding.explanation)}",
+        f"- Рекомендация модели: {_escape(finding.recommendation)}",
+    ]
+    if finding.confidence is not None:
+        lines.append(f"- Уверенность модели: {finding.confidence:g} — на статус не влияет")
+    lines += [f"- Критерий: {item.reference} — {item.title}", "- Статус: не подтверждено"]
+    return "\n".join(lines)
 
 
 def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | None:
@@ -323,11 +338,13 @@ def _llm_section(passport: RunPassport, analysis: LLMAnalysis | None) -> str | N
         return None
     coverage = (
         f"Провайдер: {analysis.provider}, модель: {analysis.model}, версия промпта: "
-        f"{analysis.prompt_version}. Запросов: {analysis.requests}; отправлено требований: "
-        f"{analysis.requirements_sent} из {analysis.requirements_total}."
+        f"{analysis.prompt_version}. Проверено требований: {analysis.requirements_sent} из "
+        f"{analysis.requirements_total} (по одному запросу на требование)."
     )
-    if analysis.truncated:
-        coverage += " Остальные требования не отправлены: сработал лимит LLM_MAX_REQUESTS."
+    counts = Counter(item.code for item in analysis.skipped)
+    if counts:
+        listed = ", ".join(f"{_SKIP_TITLES[code]} — {count}" for code, count in counts.items())
+        coverage += f" Не проверены: {listed}."
     parts = [
         "## 5. Анализ LLM (гипотезы, не подтверждены)",
         coverage,
@@ -374,7 +391,8 @@ def render_report(
     if llm_section is not None:
         sections.append(llm_section)
     sections.append(
-        "> Агент на этапе 5: замечания правил подтверждены Evidence Gate; гипотезы LLM прошли "
-        "проверку цитат, но не смысла — смысловая проверка появится на следующих этапах."
+        "> Агент на этапе 6: замечания правил подтверждены Evidence Gate; LLM-обзор каждого "
+        "требования даёт гипотезы, прошедшие проверку цитат, но не смысла — смысловая проверка "
+        "появится на следующих этапах."
     )
     return "\n\n".join(sections) + "\n"

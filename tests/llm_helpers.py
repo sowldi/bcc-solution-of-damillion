@@ -54,15 +54,15 @@ def findings_json(*items: dict[str, Any]) -> str:
 
 
 def hypothesis(requirement_id: str, quote: str, **changes: Any) -> dict[str, Any]:
+    """Элемент ответа модели в формате per-requirement review (промпт версии 2)."""
     item: dict[str, Any] = {
         "requirement_id": requirement_id,
-        "category": "ambiguity",
-        "severity": "major",
-        "criterion": "UNA",
-        "title": "Неоднозначный срок",
-        "explanation": "Срок не задан в единицах времени.",
+        "category": "clarity",
+        "issue": "Неоднозначный срок",
+        "evidence_quote": quote,
+        "reasoning": "Срок не задан в единицах времени.",
         "recommendation": "Укажите срок в минутах.",
-        "quote": quote,
+        "confidence": 0.7,
     }
     item.update(changes)
     return item

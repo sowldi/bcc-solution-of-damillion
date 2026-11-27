@@ -9,7 +9,7 @@ import pytest
 from tests.llm_helpers import findings_json, hypothesis
 from validator.ingest import load_document
 from validator.lint import LintResult, run_lint
-from validator.llm import LLMOptions, analyze_with_llm
+from validator.llm import LLMOptions, review_requirements
 from validator.llm.fake import FakeProvider
 from validator.model import Block, Document, Location
 from validator.passport import RunPassport
@@ -255,7 +255,7 @@ def test_report_footer_names_current_stage(tmp_path: Path) -> None:
 
     text = render_report(_passport(NOON), document, segmentation, lint)
 
-    assert "> Агент на этапе 5:" in text
+    assert "> Агент на этапе 6:" in text
     assert text.rstrip().endswith("смысловая проверка появится на следующих этапах.")
 
 
@@ -269,7 +269,7 @@ LLM_SPEC = (
 
 def _with_llm(tmp_path: Path, reply: str) -> str:
     document, segmentation, lint = _linted(tmp_path, LLM_SPEC)
-    analysis = analyze_with_llm(
+    analysis = review_requirements(
         document, segmentation, FakeProvider(reply), LLMOptions(max_retries=0)
     )
     passport = replace(_passport(NOON), llm_used=True, provider="fake", model="fake-model")
@@ -287,9 +287,13 @@ def test_llm_section_marks_hypotheses_unverified(tmp_path: Path) -> None:
     assert "| Модель | fake / fake-model |" in text
     assert "Провайдер: fake, модель: fake-model" in section
     assert "не являются замечаниями" in section
-    assert "**5.1. Однозначность · Неоднозначный срок**" in section
+    assert "Проверено требований: 1 из 1 (по одному запросу на требование)" in section
+    assert "**5.1. Неясная формулировка · Неоднозначный срок**" in section
     assert "- Требование: `Ф-1`" in section
     assert "- Цитата: «в течение рабочего дня» — Сервис › Функциональные требования" in section
+    assert "- Обоснование модели: Срок не задан в единицах времени." in section
+    assert "- Уверенность модели: 0.7 — на статус не влияет" in section
+    assert "- Критерий: ISO/IEC/IEEE 29148:2018, п. 5.2.5 c — Однозначность" in section
     assert "- Статус: не подтверждено" in section
     assert "### Отклонённые ответы модели (1)" in section
     assert "цитата не найдена" in section
@@ -325,3 +329,19 @@ def test_absence_findings_show_their_bounded_scope(tmp_path: Path) -> None:
     assert "CMP-05" in text
     assert "- Отсутствие проверено в области: таблица 1" in text
     assert "извлечённого из документа" in text
+
+
+def test_llm_section_lists_skipped_requirements(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path,
+        LLM_SPEC + "* Ф-2. Читатель отменяет бронь.\n* Ф-3. Читатель отменяет бронь.\n",
+    )
+    analysis = review_requirements(
+        document, segmentation, FakeProvider(), LLMOptions(max_retries=0, max_requests=1)
+    )
+    passport = replace(_passport(NOON), llm_used=True, provider="fake", model="fake-model")
+
+    text = render_report(passport, document, segmentation, lint, analysis)
+
+    assert "Проверено требований: 1 из 3" in text
+    assert "Не проверены: лимит запросов LLM_MAX_REQUESTS — 1, дословный повтор — 1." in text

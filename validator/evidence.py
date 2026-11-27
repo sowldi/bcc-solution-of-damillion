@@ -55,6 +55,7 @@ from validator.findings import (
     ABSENCE_CLAIMS,
     EVIDENCE_KINDS,
     ORIGINS,
+    REVIEW_CATEGORIES,
     RULE_CATEGORIES,
     SEVERITIES,
     AbsenceClaim,
@@ -66,6 +67,7 @@ from validator.findings import (
     RejectedFinding,
     RuleCategory,
     Severity,
+    is_probability,
 )
 from validator.ingest.common import one_line
 from validator.model import Block, Document, Location
@@ -309,6 +311,12 @@ def _problems(
         problems.append(f"Недопустимый вид доказательства: {finding.evidence_kind!r}.")
     if finding.origin not in ORIGINS:
         problems.append(f"Недопустимое происхождение (origin): {finding.origin!r}.")
+    if finding.origin == "rule" and (
+        finding.review_category is not None or finding.confidence is not None
+    ):
+        problems.append(
+            "У замечания правила не может быть полей LLM-обзора (review_category, confidence)."
+        )
     binding = _binding_problems(finding, segmentation, document)
     if binding:  # смещения относятся к другому тексту — дальше проверять бессмысленно
         return problems + binding
@@ -345,6 +353,10 @@ def _type_problems(finding: Finding) -> list[str]:
         isinstance(rid, str) for rid in finding.requirement_ids
     ):
         problems.append("Поле requirement_ids: ожидается кортеж строк.")
+    if finding.review_category is not None and finding.review_category not in REVIEW_CATEGORIES:
+        problems.append(f"Поле review_category: недопустимое значение {finding.review_category!r}.")
+    if finding.confidence is not None and not is_probability(finding.confidence):
+        problems.append("Поле confidence: ожидается число от 0 до 1 — оценка модели.")
     if finding.absence is not None and not (
         isinstance(finding.absence, AbsenceClaim)
         and all(isinstance(getattr(finding.absence, f.name), str) for f in fields(AbsenceClaim))
