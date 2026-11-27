@@ -464,6 +464,47 @@ _QUOTED = re.compile(r"«([^«»]{2,150})»")
 _HEADING_NUMBER = re.compile(r"\s*(\d+(?:\.\d+)*)\.?\s")
 
 
+@dataclass(frozen=True)
+class ReferenceSpan:
+    """Ссылка и её точное место: text[start:end] — ID, «раздел 4.2» или «‹название›»."""
+
+    label: str
+    start: int
+    end: int
+
+
+def locate_references(
+    text: str, *, doc_ids: Iterable[str], headings: Iterable[str], own_id: str | None
+) -> tuple[ReferenceSpan, ...]:
+    """Все ссылки в тексте с их отрезками, в порядке появления (повторы сохраняются).
+
+    Метки — как у find_references: «req:Ф-2», «section:<заголовок>», «unresolved:…».
+    """
+    known_ids = set(doc_ids)
+    titles = [one_line(title) for title in headings]
+    by_number = {m.group(1): t for t in titles if (m := _HEADING_NUMBER.match(t + " "))}
+    by_title = {title.casefold(): title for title in titles}
+    found: list[ReferenceSpan] = []
+    for match in _ID_ANYWHERE.finditer(text):
+        ref = match.group("id")
+        if ref == own_id or not is_document_id(ref):
+            continue
+        if ref in known_ids:
+            found.append(ReferenceSpan(f"req:{ref}", match.start(), match.end()))
+        elif _REFERENCE_CUE.search(text[max(0, match.start() - 25) : match.start()]):
+            found.append(ReferenceSpan(f"unresolved:{ref}", match.start(), match.end()))
+    for match in _SECTION_REFERENCE.finditer(text):
+        target = by_number.get(match.group("num"))
+        label = f"section:{target}" if target else f"unresolved:{one_line(match.group(0))}"
+        found.append(ReferenceSpan(label, match.start(), match.end()))
+    for match in _QUOTED.finditer(text):
+        title = by_title.get(one_line(match.group(1)).casefold())
+        if title:
+            found.append(ReferenceSpan(f"section:{title}", match.start(), match.end()))
+    found.sort(key=lambda span: (span.start, span.label))
+    return tuple(found)
+
+
 def find_references(
     text: str, *, doc_ids: Iterable[str], headings: Iterable[str], own_id: str | None
 ) -> tuple[str, ...]:
@@ -473,26 +514,5 @@ def find_references(
     «раздел 4.2» или по названию в «ёлочках»); «unresolved:…» — ссылка, цель которой
     в документе не найдена (только явные: «см. Ф-9», «раздел 7»).
     """
-    known_ids = set(doc_ids)
-    titles = [one_line(title) for title in headings]
-    by_number = {m.group(1): t for t in titles if (m := _HEADING_NUMBER.match(t + " "))}
-    by_title = {title.casefold(): title for title in titles}
-    found: list[tuple[int, str]] = []
-    for match in _ID_ANYWHERE.finditer(text):
-        ref = match.group("id")
-        if ref == own_id or not is_document_id(ref):
-            continue
-        if ref in known_ids:
-            found.append((match.start(), f"req:{ref}"))
-        elif _REFERENCE_CUE.search(text[max(0, match.start() - 25) : match.start()]):
-            found.append((match.start(), f"unresolved:{ref}"))
-    for match in _SECTION_REFERENCE.finditer(text):
-        target = by_number.get(match.group("num"))
-        label = f"section:{target}" if target else f"unresolved:{one_line(match.group(0))}"
-        found.append((match.start(), label))
-    for match in _QUOTED.finditer(text):
-        title = by_title.get(one_line(match.group(1)).casefold())
-        if title:
-            found.append((match.start(), f"section:{title}"))
-    found.sort()
-    return tuple(dict.fromkeys(ref for _, ref in found))
+    spans = locate_references(text, doc_ids=doc_ids, headings=headings, own_id=own_id)
+    return tuple(dict.fromkeys(span.label for span in spans))

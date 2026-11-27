@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import socket
 from pathlib import Path
 
 import pytest
@@ -165,3 +166,110 @@ def test_corrupted_pdf_is_input_error(tmp_path: Path, capsys: pytest.CaptureFixt
     assert main([str(src), str(tmp_path / "report.md")]) == EXIT_INPUT_ERROR
     assert "PDF повреждён" in capsys.readouterr().err
     assert not (tmp_path / "report.md").exists()
+
+
+# --- режим --rules-only -----------------------------------------------------------------
+
+LINT_SPEC = (
+    "# Сервис бронирования книг\n\n## Функциональные требования\n\n"
+    "* Ф-1. Каталог книг должен быть удобным.\n* Ф-2. Срок брони: TBD.\n"
+)
+
+
+def _spec(tmp_path: Path) -> Path:
+    path = tmp_path / "spec.md"
+    path.write_text(LINT_SPEC, encoding="utf-8")
+    return path
+
+
+def test_rules_only_works_without_credentials(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = tmp_path / "report.md"
+
+    assert main([str(_spec(tmp_path)), str(report), "--rules-only"]) == EXIT_OK
+
+    text = report.read_text(encoding="utf-8")
+    assert "## 4. Детерминированная проверка" in text
+    assert "| Режим | только детерминированные правила (--rules-only) |" in text
+    assert "| Модель | не используется (режим --rules-only) |" in text
+    assert "TST-01" in text
+    assert "CMP-01" in text
+    out = capsys.readouterr().out
+    assert "Замечаний: 2" in out
+
+
+def test_rules_only_ignores_invalid_llm_config(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("LLM_PROVIDER=нет-такого\nLLM_RPM=много\n", encoding="utf-8")
+    spec = _spec(tmp_path)
+
+    assert main([str(spec), str(tmp_path / "rules.md"), "--rules-only"]) == EXIT_OK
+    assert main([str(spec), str(tmp_path / "full.md")]) == EXIT_CONFIG_ERROR
+
+
+def test_rules_only_never_loads_llm_settings_or_opens_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("в режиме --rules-only нет обращений к настройкам LLM и сети")
+
+    monkeypatch.setattr("validator.cli.load_settings", forbidden)
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(socket, "getaddrinfo", forbidden)
+
+    assert main([str(_spec(tmp_path)), str(tmp_path / "report.md"), "--rules-only"]) == EXIT_OK
+
+
+def test_rules_only_conflicts_with_llm_options(run_cli: RunCli, tmp_path: Path) -> None:
+    spec = _spec(tmp_path)
+
+    for option in (["--provider", "gemini"], ["--model", "any"]):
+        result = run_cli(str(spec), str(tmp_path / "report.md"), "--rules-only", *option)
+        assert result.returncode == EXIT_INPUT_ERROR
+        assert "--rules-only" in result.stderr
+    assert not (tmp_path / "report.md").exists()
+
+
+def test_rules_only_input_errors_keep_exit_codes(tmp_path: Path) -> None:
+    missing = main([str(tmp_path / "nope.md"), str(tmp_path / "r.md"), "--rules-only"])
+    empty = tmp_path / "empty.md"
+    empty.write_text("\n", encoding="utf-8")
+
+    assert missing == EXIT_INPUT_ERROR
+    assert main([str(empty), str(tmp_path / "r.md"), "--rules-only"]) == EXIT_INPUT_ERROR
+
+
+def test_standard_mode_also_runs_deterministic_rules(tmp_path: Path) -> None:
+    report = tmp_path / "report.md"
+
+    assert main([str(_spec(tmp_path)), str(report)]) == EXIT_OK
+
+    text = report.read_text(encoding="utf-8")
+    assert "## 4. Детерминированная проверка" in text
+    assert "| Режим | стандартный |" in text
+    assert "не вызывалась (настроено: gemini" in text
+
+
+@pytest.mark.parametrize(
+    ("writer", "name"),
+    [
+        (write_markdown, "spec.md"),
+        (write_text, "spec.txt"),
+        (write_docx, "spec.docx"),
+        (write_sample_pdf, "spec.pdf"),
+    ],
+    ids=["md", "txt", "docx", "pdf"],
+)
+def test_rules_only_command_reads_every_supported_format(
+    run_cli: RunCli, tmp_path: Path, writer: Writer, name: str
+) -> None:
+    source = writer(tmp_path / name, SAMPLE)
+    report = tmp_path / "out" / f"{name}.report.md"
+
+    result = run_cli(str(source), str(report), "--rules-only")
+
+    assert result.returncode == EXIT_OK, result.stderr
+    text = report.read_text(encoding="utf-8")
+    assert "## 4. Детерминированная проверка" in text
+    assert "Замечаний:" in result.stdout

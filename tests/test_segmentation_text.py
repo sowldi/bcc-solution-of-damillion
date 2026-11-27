@@ -7,6 +7,7 @@ import pytest
 from validator.segmentation.text import (
     content_key,
     find_references,
+    locate_references,
     normalize_text,
     parse_prefix,
     split_statements,
@@ -228,6 +229,24 @@ def test_find_references_resolves_known_targets() -> None:
         "unresolved:раздел 4.2",
         "section:Требования к данным",
     )
+
+
+def test_locate_references_gives_exact_spans_in_text_order() -> None:
+    text = "Порог задаётся как в Ф-2 (см. Ф-9), см. раздел 4.2 и «Требования к данным»."
+
+    spans = locate_references(
+        text,
+        doc_ids={"Ф-1", "Ф-2"},
+        headings=["Требования к данным", "4.1 Общие положения"],
+        own_id="Ф-1",
+    )
+
+    assert [(s.label, text[s.start : s.end]) for s in spans] == [
+        ("req:Ф-2", "Ф-2"),
+        ("unresolved:Ф-9", "Ф-9"),
+        ("unresolved:раздел 4.2", "раздел 4.2"),
+        ("section:Требования к данным", "«Требования к данным»"),
+    ]
 
 
 def test_find_references_resolves_section_numbers_and_ignores_own_id() -> None:

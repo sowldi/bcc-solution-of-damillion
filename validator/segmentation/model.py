@@ -244,6 +244,27 @@ def _location_from_dict(data: Any) -> Location:
     )
 
 
+def source_ref_to_dict(ref: SourceRef) -> dict[str, Any]:
+    """SourceRef → JSON-объект (общий формат сегментации и замечаний)."""
+    return {
+        "block": ref.block,
+        "start": ref.start,
+        "end": ref.end,
+        "location": _location_to_dict(ref.location),
+    }
+
+
+def source_ref_from_dict(data: Any) -> SourceRef:
+    if not isinstance(data, dict):
+        raise ValueError("source должен быть объектом")
+    return SourceRef(
+        block=_int(data, "block"),
+        start=_int(data, "start"),
+        end=_int(data, "end"),
+        location=_location_from_dict(data.get("location")),
+    )
+
+
 def _requirement_to_dict(fragment: Requirement) -> dict[str, Any]:
     return {
         "id": fragment.id,
@@ -251,15 +272,7 @@ def _requirement_to_dict(fragment: Requirement) -> dict[str, Any]:
         "normalized": fragment.normalized,
         "role": fragment.role,
         "category": fragment.category,
-        "sources": [
-            {
-                "block": ref.block,
-                "start": ref.start,
-                "end": ref.end,
-                "location": _location_to_dict(ref.location),
-            }
-            for ref in fragment.sources
-        ],
+        "sources": [source_ref_to_dict(ref) for ref in fragment.sources],
         "section_path": list(fragment.section_path),
         "doc_id": fragment.doc_id,
         "doc_number": fragment.doc_number,
@@ -277,18 +290,7 @@ def _requirement_to_dict(fragment: Requirement) -> dict[str, Any]:
 def _requirement_from_dict(data: Any) -> Requirement:
     if not isinstance(data, dict):
         raise ValueError("фрагмент должен быть объектом")
-    sources = []
-    for item in _list(data, "sources"):
-        if not isinstance(item, dict):
-            raise ValueError("source должен быть объектом")
-        sources.append(
-            SourceRef(
-                block=_int(item, "block"),
-                start=_int(item, "start"),
-                end=_int(item, "end"),
-                location=_location_from_dict(item.get("location")),
-            )
-        )
+    sources = [source_ref_from_dict(item) for item in _list(data, "sources")]
     return Requirement(
         id=_str(data, "id"),
         text=_str(data, "text"),

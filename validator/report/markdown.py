@@ -1,20 +1,32 @@
 """Markdown-отчёт на русском.
 
-Этап 2: паспорт прогона, сводка извлечения текста и нарезка требований.
-Разделы анализа добавляются далее.
+Этап 3: паспорт прогона, сводка извлечения текста, нарезка требований и детерминированная
+проверка (замечания правил, прошедшие проверку доказательств). LLM-анализ добавляется далее.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 
+from validator.criteria import criterion
+from validator.findings import SEVERITIES, SEVERITY_TITLES, Evidence, Finding, Severity
 from validator.ingest.common import one_line
+from validator.lint import LintResult
 from validator.model import FORMAT_TITLES, Document
 from validator.passport import RunPassport
 from validator.segmentation import CATEGORY_TITLES, Requirement, Segmentation
 from validator.segmentation.text import parse_prefix
 
 _BRIEF_LIMIT = 140
+_SEVERITY_GROUPS: dict[Severity, str] = {
+    "critical": "Критичные",
+    "major": "Существенные",
+    "minor": "Незначительные",
+    "info": "Информационные",
+}
+# Символы, которые Markdown превращает в разметку: в цитате они должны остаться текстом.
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_\[\]<>~|])")
 
 
 def _cell(value: str) -> str:
@@ -41,11 +53,13 @@ def _format_timestamp(moment: datetime) -> str:
 
 
 def _passport_section(passport: RunPassport) -> str:
-    model = (
-        f"{passport.provider} / {passport.model}"
-        if passport.llm_used
-        else f"не вызывалась (настроено: {passport.provider} / {passport.model})"
-    )
+    if passport.mode == "rules-only":
+        mode = "только детерминированные правила (--rules-only)"
+        model = "не используется (режим --rules-only)"
+    else:
+        mode = "стандартный"
+        configured = f"{passport.provider} / {passport.model}"
+        model = configured if passport.llm_used else f"не вызывалась (настроено: {configured})"
     rows = [
         ("Документ", passport.document_name),
         ("Путь", passport.document_path),
@@ -53,6 +67,7 @@ def _passport_section(passport: RunPassport) -> str:
         ("Размер текста, символов", str(passport.document_chars)),
         ("Дата и время прогона", _format_timestamp(passport.started_at)),
         ("Версия агента", passport.agent_version),
+        ("Режим", mode),
         ("Модель", model),
     ]
     return "## 1. Паспорт прогона\n\n" + _table(rows)
@@ -167,8 +182,99 @@ def _segmentation_section(segmentation: Segmentation) -> str:
     return "\n\n".join(parts)
 
 
+def _escape(text: str) -> str:
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", one_line(text))
+
+
+def _quote(text: str) -> str:
+    """Цитата в одну строку (переводы строк — пробелы), разметка Markdown экранирована."""
+    return f"«{_escape(text)}»" if text else "(пусто)"
+
+
+def _where(evidence: Evidence) -> str:
+    places = dict.fromkeys(ref.location.describe() for ref in evidence.sources)
+    return "; ".join(places) or "место не определено"
+
+
+def _finding_block(number: int, finding: Finding) -> str:
+    item = criterion(finding.criterion)
+    lines = [f"**4.{number}. {finding.rule_id} · {finding.title}**", ""]
+    if len(finding.evidence) == 1:
+        evidence = finding.evidence[0]
+        lines.append(f"- Требование: `{evidence.requirement_id}`")
+        lines.append(f"- Цитата: {_quote(evidence.quote)} — {_where(evidence)}")
+    else:
+        lines.append("- Требования: " + ", ".join(f"`{rid}`" for rid in finding.requirement_ids))
+        lines.append("- Цитаты:")
+        lines += [
+            f"  - `{e.requirement_id}`: {_quote(e.quote)} — {_where(e)}" for e in finding.evidence
+        ]
+    lines += [
+        f"- Почему: {_escape(finding.explanation)}",
+        f"- Как исправить: {_escape(finding.recommendation)}",
+        f"- Критерий: {item.reference} — {item.title}",
+        f"- ID замечания: `{finding.id}`",
+    ]
+    return "\n".join(lines)
+
+
+def _lint_section(lint: LintResult, segmentation: Segmentation | None) -> str:
+    atomic = len(segmentation.atomic_requirements) if segmentation else 0
+    parts = [
+        "## 4. Детерминированная проверка",
+        f"Каталог правил {lint.catalog_version}, правил: {len(lint.rules)} — проверяемость, "
+        "однозначность, полнота, согласованность, трассируемость. Правила формулировок "
+        f"применены к атомарным требованиям ({atomic}), структурные — ко всему документу. "
+        "Каждое замечание прошло проверку доказательств: цитата — точный фрагмент документа, "
+        "место вычислено по источнику.",
+    ]
+    if segmentation is not None and segmentation.ambiguous:
+        parts.append(
+            f"Неоднозначные фрагменты ({len(segmentation.ambiguous)}) правилами формулировок "
+            "не проверялись: сначала нужно подтвердить, что это требования."
+        )
+    parts += [
+        _grid(
+            ("Важность", "Замечаний"),
+            [(SEVERITY_TITLES[severity], str(lint.count(severity))) for severity in SEVERITIES],
+        ),
+        f"Проверка доказательств: подтверждено — {len(lint.findings)}, "
+        f"отклонено — {len(lint.rejected)}.",
+    ]
+    if not lint.findings:
+        parts.append(
+            "Детерминированные правила замечаний не нашли. Это не означает, что документ "
+            "корректен: правила проверяют только формальные признаки — оценочные слова, "
+            "заглушки, ссылки, идентификаторы, дубли; смысловые пропуски и противоречия ими "
+            "не выявляются."
+        )
+    number = 0
+    for severity in SEVERITIES:
+        group = [finding for finding in lint.findings if finding.severity == severity]
+        if not group:
+            continue
+        parts.append(f"### {_SEVERITY_GROUPS[severity]} ({len(group)})")
+        for finding in group:
+            number += 1
+            parts.append(_finding_block(number, finding))
+    if lint.rejected:
+        parts += [
+            "### Отклонено проверкой доказательств",
+            "Эти замечания не включены в отчёт: их доказательства не подтвердились по документу "
+            "(это ошибка правила, а не документа).",
+            "\n".join(
+                f"- `{rejected.finding.id}`: {_escape('; '.join(rejected.reasons))}"
+                for rejected in lint.rejected
+            ),
+        ]
+    return "\n\n".join(parts)
+
+
 def render_report(
-    passport: RunPassport, document: Document, segmentation: Segmentation | None = None
+    passport: RunPassport,
+    document: Document,
+    segmentation: Segmentation | None = None,
+    lint: LintResult | None = None,
 ) -> str:
     sections = [
         f"# Отчёт о проверке требований: {_cell(passport.document_name)}",
@@ -177,5 +283,10 @@ def render_report(
     ]
     if segmentation is not None:
         sections.append(_segmentation_section(segmentation))
-    sections.append("> Агент на этапе 2: требования выделены, анализ качества ещё не подключён.")
+    if lint is not None:
+        sections.append(_lint_section(lint, segmentation))
+    sections.append(
+        "> Агент на этапе 3: детерминированные правила и проверка доказательств подключены; "
+        "LLM-анализ ещё не подключён."
+    )
     return "\n\n".join(sections) + "\n"

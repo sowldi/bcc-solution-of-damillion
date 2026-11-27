@@ -13,6 +13,7 @@ from validator import __version__
 from validator.config import PROVIDERS, load_settings
 from validator.errors import EXIT_INTERNAL_ERROR, EXIT_OK, InputError, ValidatorError
 from validator.ingest import SUPPORTED_SUFFIXES, load_document
+from validator.lint import run_lint
 from validator.passport import build_passport
 from validator.report import render_report, write_text_atomic
 from validator.segmentation import segment_document
@@ -29,6 +30,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("output", type=Path, help="путь к файлу отчёта (Markdown)")
     parser.add_argument("--provider", choices=PROVIDERS, help="LLM-провайдер (иначе из .env)")
     parser.add_argument("--model", help="модель (иначе из .env)")
+    parser.add_argument(
+        "--rules-only",
+        action="store_true",
+        help="только детерминированные правила: настройки LLM не читаются, ключи и сеть не нужны",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -41,17 +47,32 @@ def _check_output(output: Path, document: Path) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.rules_only and (args.provider or args.model):
+        parser.error("--rules-only несовместим с --provider и --model: в этом режиме LLM не нужен.")
     started_at = datetime.now().astimezone()
     try:
-        settings = load_settings(provider_override=args.provider, model_override=args.model)
+        # В режиме --rules-only настройки LLM не читаются вовсе: ни .env, ни ключи, ни сеть.
+        settings = (
+            None
+            if args.rules_only
+            else load_settings(provider_override=args.provider, model_override=args.model)
+        )
         _check_output(args.output, args.input)
         document = load_document(args.input)
         for warning in document.warnings:
             print(f"Предупреждение: {warning}", file=sys.stderr)
         segmentation = segment_document(document)
-        passport = build_passport(document, settings, llm_used=False, started_at=started_at)
-        write_text_atomic(args.output, render_report(passport, document, segmentation))
+        lint = run_lint(document, segmentation)
+        passport = build_passport(
+            document,
+            settings,
+            llm_used=False,
+            started_at=started_at,
+            mode="rules-only" if args.rules_only else "standard",
+        )
+        write_text_atomic(args.output, render_report(passport, document, segmentation, lint))
     except ValidatorError as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
         return exc.exit_code
@@ -62,6 +83,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"Требований: {len(segmentation.atomic_requirements)}, "
         f"неоднозначных фрагментов: {len(segmentation.ambiguous)}."
     )
+    print(
+        f"Замечаний: {len(lint.findings)} "
+        f"(отклонено проверкой доказательств: {len(lint.rejected)})."
+    )
+    if lint.rejected:
+        print(
+            f"Предупреждение: {len(lint.rejected)} замечаний правил не прошли проверку "
+            "доказательств и не включены в отчёт — подробности в отчёте.",
+            file=sys.stderr,
+        )
     print(f"Отчёт записан: {args.output}")
     return EXIT_OK
 

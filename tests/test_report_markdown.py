@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from validator.ingest import load_document
+from validator.lint import LintResult, run_lint
 from validator.model import Block, Document, Location
 from validator.passport import RunPassport
 from validator.report import render_report
@@ -161,3 +162,94 @@ def test_encoding_and_warnings_are_shown() -> None:
     assert "| Кодировка | cp1251 |" in text
     assert "Страниц" not in text
     assert "- Кодировка угадана." in text
+
+
+# --- раздел 4: детерминированная проверка ----------------------------------------------
+
+
+def _linted(tmp_path: Path, markdown: str) -> tuple[Document, Segmentation, LintResult]:
+    document, segmentation = _segmentation(tmp_path, markdown)
+    return document, segmentation, run_lint(document, segmentation)
+
+
+def test_lint_section_shows_verified_findings(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n"
+        "* Ф-1. Каталог книг должен быть удобным.\n* Ф-2. Срок брони: TBD.\n",
+    )
+
+    text = render_report(_passport(NOON), document, segmentation, lint)
+
+    assert "## 4. Детерминированная проверка" in text
+    assert "| Существенное | 2 |" in text
+    assert "Проверка доказательств: подтверждено — 2, отклонено — 0." in text
+    assert "### Существенные (2)" in text
+    assert "TST-01 · Субъективная оценка качества" in text
+    assert "- Требование: `Ф-1`" in text
+    assert "- Цитата: «удобным» — Сервис › Функциональные требования — строка 5" in text
+    assert "- Почему: «удобным»" in text
+    assert "- Как исправить:" in text
+    assert "- Критерий: ISO/IEC/IEEE 29148:2018, п. 5.2.5 g — Проверяемость" in text
+    assert text.index("## 3.") < text.index("## 4.")
+
+
+def test_lint_section_lists_every_participant(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n"
+        "* Ф-1. Читатель бронирует книгу через каталог.\n"
+        "* Ф-2. Читатель бронирует книгу через каталог.\n",
+    )
+
+    text = render_report(_passport(NOON), document, segmentation, lint)
+
+    assert "- Требования: `Ф-1`, `Ф-2`" in text
+    assert "  - `Ф-1`: «Читатель бронирует книгу через каталог.» — " in text
+    assert "  - `Ф-2`: «Читатель бронирует книгу через каталог.» — " in text
+
+
+def test_lint_section_without_findings_does_not_claim_correctness(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n"
+        "* Ф-1. Система сохраняет бронь не позднее 2 секунд после подтверждения.\n",
+    )
+
+    text = render_report(_passport(NOON), document, segmentation, lint)
+
+    assert lint.findings == ()
+    assert "Детерминированные правила замечаний не нашли" in text
+    assert "не означает, что документ корректен" in text
+
+
+def test_lint_quotes_are_escaped_for_markdown(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path,
+        "# Сервис\n\n## Функциональные требования\n\n"
+        "* Ф-1. Поле limit_kzt [по умолчанию] хранит лимит.\n"
+        "* Ф-2. Поле limit_kzt [по умолчанию] хранит лимит.\n",
+    )
+
+    text = render_report(_passport(NOON), document, segmentation, lint)
+
+    assert r"«Поле limit\_kzt \[по умолчанию\] хранит лимит.»" in text
+
+
+def test_passport_shows_rules_only_mode() -> None:
+    passport = replace(_passport(NOON), provider=None, model=None, mode="rules-only")
+
+    text = render_report(passport, _document())
+
+    assert "| Режим | только детерминированные правила (--rules-only) |" in text
+    assert "| Модель | не используется (режим --rules-only) |" in text
+
+
+def test_report_footer_names_current_stage(tmp_path: Path) -> None:
+    document, segmentation, lint = _linted(
+        tmp_path, "# Сервис\n\n## Функциональные требования\n\n* Ф-1. Читатель бронирует книгу.\n"
+    )
+
+    text = render_report(_passport(NOON), document, segmentation, lint)
+
+    assert text.rstrip().endswith("LLM-анализ ещё не подключён.")

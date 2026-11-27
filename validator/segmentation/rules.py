@@ -445,4 +445,10 @@ def _is_placeholder(lowered: str) -> bool:
     stripped = lowered.strip(" .")
     if stripped in _PLACEHOLDER_EXACT or lowered.strip() in _PLACEHOLDER_EXACT:
         return True
+    return placeholder_phrase(lowered)
+
+
+def placeholder_phrase(text: str) -> bool:
+    """Текст — фраза-заглушка («Заполняется позже», «To be defined»), не длиннее 80 символов."""
+    stripped = text.casefold().strip(" .")
     return len(stripped) <= 80 and stripped.startswith(_PLACEHOLDER_START)
